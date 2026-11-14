@@ -1,0 +1,64 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #eef1fa;
+  --bg-elevated: #e4e9f7;
+  --surface: #ffffff;
+  --surface-2: #f4f7ff;
+  --text: #0e1226;
+  --muted: #5b6484;
+  --border: #d7def2;
+  --primary: #5b4cdb;
+  --primary-soft: rgba(91, 76, 219, 0.12);
+  --emerald: #00a870;
+  --gold: #d99b16;
+  --danger: #e13b5a;
+}
+
+.dark {
+  --bg: #0b0d17;
+  --bg-elevated: #0f1222;
+  --surface: #15192e;
+  --surface-2: #1c213c;
+  --text: #eef1ff;
+  --muted: #929ac0;
+  --border: #252b4d;
+  --primary: #6c5ce7;
+  --primary-soft: rgba(108, 92, 231, 0.18);
+  --emerald: #00d68f;
+  --gold: #f7b731;
+  --danger: #ff5c7a;
+}
+
+html,
+body {
+  min-height: 100%;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Hind Siliguri', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.wheel-spin-transition {
+  transition: transform 4.6s cubic-bezier(0.17, 0.67, 0.16, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wheel-spin-transition {
+    transition-duration: 0.4s;
+  }
+}
+
+.text-balance {
+  text-wrap: balance;
+}

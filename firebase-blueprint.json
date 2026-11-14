@@ -1,0 +1,775 @@
+{
+  "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Core TakaDear user wallet, streak, daily limits, and referral counters.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "refCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 24,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "referredBy": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "balance": {
+          "type": "number"
+        },
+        "totalEarned": {
+          "type": "number"
+        },
+        "referrals": {
+          "type": "integer"
+        },
+        "refEarned": {
+          "type": "number"
+        },
+        "streakCount": {
+          "type": "integer"
+        },
+        "streakLast": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "dailyDate": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 16
+        },
+        "dailySpins": {
+          "type": "integer"
+        },
+        "dailyAds": {
+          "type": "integer"
+        },
+        "dailyTodayEarn": {
+          "type": "number"
+        },
+        "dailyTasks": {
+          "type": "object"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["dark", "light"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "suspended": {
+          "type": "boolean"
+        },
+        "suspensionReason": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "suspendedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "name",
+        "refCode",
+        "balance",
+        "totalEarned",
+        "referrals",
+        "refEarned",
+        "streakCount",
+        "dailyDate",
+        "dailySpins",
+        "dailyAds",
+        "dailyTodayEarn",
+        "dailyTasks",
+        "theme",
+        "role",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateVault": {
+      "title": "UserPrivateVault",
+      "description": "AES-256-GCM encrypted PII vault isolated per user.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "emailMasked": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "encryptedEmail": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2048
+        },
+        "encryptedPhone": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "encryptionAlgorithm": {
+          "type": "string",
+          "enum": ["AES-256-GCM"]
+        },
+        "keyVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "emailMasked",
+        "encryptedEmail",
+        "encryptionAlgorithm",
+        "keyVersion",
+        "updatedAt"
+      ]
+    },
+    "TransactionRecord": {
+      "title": "TransactionRecord",
+      "description": "Immutable ledger entry for earnings and withdrawals.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["in", "out"]
+        },
+        "amount": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "receiptId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        },
+        "receiptSignature": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "type",
+        "amount",
+        "title",
+        "icon",
+        "receiptId",
+        "receiptSignature",
+        "createdAt"
+      ]
+    },
+    "SpinRecord": {
+      "title": "SpinRecord",
+      "description": "Lucky wheel spin reward record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "prizeIndex": {
+          "type": "integer"
+        },
+        "receiptId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        },
+        "receiptSignature": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "amount",
+        "prizeIndex",
+        "receiptId",
+        "receiptSignature",
+        "createdAt"
+      ]
+    },
+    "WithdrawalRequest": {
+      "title": "WithdrawalRequest",
+      "description": "Encrypted payout request to bKash, Nagad, or Rocket.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "method": {
+          "type": "string",
+          "enum": ["bKash", "Nagad", "Rocket"]
+        },
+        "maskedNumber": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 20
+        },
+        "encryptedAccount": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2048
+        },
+        "amount": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["প্রসেসিং", "সম্পন্ন", "বাতিল"]
+        },
+        "receiptId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        },
+        "receiptSignature": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "method",
+        "maskedNumber",
+        "encryptedAccount",
+        "amount",
+        "status",
+        "receiptId",
+        "receiptSignature",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ReferralCodeEntry": {
+      "title": "ReferralCodeEntry",
+      "description": "Public referral code ownership lookup without exposing PII.",
+      "type": "object",
+      "properties": {
+        "refCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 24,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["refCode", "ownerId", "createdAt"]
+    },
+    "ReferralClaim": {
+      "title": "ReferralClaim",
+      "description": "Atomic referral reward claim created by invitee and claimed by referrer.",
+      "type": "object",
+      "properties": {
+        "referredUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "referrerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "refCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 24,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "friendAmount": {
+          "type": "number"
+        },
+        "minTasks": {
+          "type": "integer"
+        },
+        "qualified": {
+          "type": "boolean"
+        },
+        "friendClaimed": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "claimed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["referredUid", "referrerUid", "refCode", "amount", "status", "createdAt", "updatedAt"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted database record authorizing admin privileges.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "TaskSellSettings": {
+      "title": "TaskSellSettings",
+      "description": "Admin-controlled pricing and required passwords for Gmail Sell and Facebook Sell tasks.",
+      "type": "object",
+      "properties": {
+        "gmailEnabled": {
+          "type": "boolean"
+        },
+        "gmailPrice": {
+          "type": "number"
+        },
+        "gmailPassword": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "gmailNote": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "facebookEnabled": {
+          "type": "boolean"
+        },
+        "facebookPrice": {
+          "type": "number"
+        },
+        "facebookPassword": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "facebookNote": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "gmailEnabled",
+        "gmailPrice",
+        "gmailPassword",
+        "facebookEnabled",
+        "facebookPrice",
+        "facebookPassword",
+        "updatedAt"
+      ]
+    },
+    "RegularTaskSettings": {
+      "title": "RegularTaskSettings",
+      "description": "Admin-controlled ON/OFF toggle, daily limits, rewards, view durations, and destination links for regular tasks (ad, article, quiz, survey, app).",
+      "type": "object",
+      "properties": {
+        "adEnabled": { "type": "boolean" },
+        "adLimit": { "type": "integer" },
+        "adReward": { "type": "number" },
+        "adTimer": { "type": "integer" },
+        "adUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
+        "articleEnabled": { "type": "boolean" },
+        "articleLimit": { "type": "integer" },
+        "articleReward": { "type": "number" },
+        "articleTimer": { "type": "integer" },
+        "articleUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
+        "quizEnabled": { "type": "boolean" },
+        "quizLimit": { "type": "integer" },
+        "quizReward": { "type": "number" },
+        "quizTimer": { "type": "integer" },
+        "quizUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
+        "surveyEnabled": { "type": "boolean" },
+        "surveyLimit": { "type": "integer" },
+        "surveyReward": { "type": "number" },
+        "surveyTimer": { "type": "integer" },
+        "surveyUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
+        "appEnabled": { "type": "boolean" },
+        "appLimit": { "type": "integer" },
+        "appReward": { "type": "number" },
+        "appTimer": { "type": "integer" },
+        "appUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "adEnabled", "adLimit", "adReward", "adTimer", "adUrl",
+        "articleEnabled", "articleLimit", "articleReward", "articleTimer", "articleUrl",
+        "quizEnabled", "quizLimit", "quizReward", "quizTimer", "quizUrl",
+        "surveyEnabled", "surveyLimit", "surveyReward", "surveyTimer", "surveyUrl",
+        "appEnabled", "appLimit", "appReward", "appTimer", "appUrl",
+        "updatedAt"
+      ]
+    },
+    "ReferralSettings": {
+      "title": "ReferralSettings",
+      "description": "Admin-controlled referrer bonus, friend welcome bonus, and minimum task conditions for referrals.",
+      "type": "object",
+      "properties": {
+        "referrerBonus": { "type": "number" },
+        "friendBonus": { "type": "number" },
+        "minTasks": { "type": "integer" },
+        "conditionNote": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["referrerBonus", "friendBonus", "minTasks", "updatedAt"]
+    },
+    "AccountSubmission": {
+      "title": "AccountSubmission",
+      "description": "Pending, approved, or rejected Gmail/Facebook account sell submissions with AES-256-GCM encrypted credentials.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["gmail", "facebook"]
+        },
+        "maskedIdentifier": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "encryptedCredentials": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 2048
+        },
+        "amount": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["পেন্ডিং", "এপ্রুভড", "রিজেক্টেড"]
+        },
+        "adminNote": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "receiptId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64
+        },
+        "receiptSignature": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "platform",
+        "maskedIdentifier",
+        "encryptedCredentials",
+        "amount",
+        "status",
+        "receiptId",
+        "receiptSignature",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportThread": {
+      "title": "SupportThread",
+      "description": "Live support conversation thread between a user (active or suspended) and admin.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "userRefCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 24,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "userSuspended": {
+          "type": "boolean"
+        },
+        "lastMessage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "lastSender": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "unreadByAdmin": {
+          "type": "integer"
+        },
+        "unreadByUser": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "userName",
+        "userRefCode",
+        "userSuspended",
+        "lastMessage",
+        "lastSender",
+        "unreadByAdmin",
+        "unreadByUser",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "Individual message inside a live support thread.",
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "senderRole": {
+          "type": "string",
+          "enum": ["user", "admin"]
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "threadId",
+        "senderId",
+        "senderRole",
+        "senderName",
+        "text",
+        "createdAt"
+      ]
+    },
+    "ConnectionProbe": {
+      "title": "ConnectionProbe",
+      "description": "Server connection verification document.",
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": ["ok"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "Primary user account state and earning statistics."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateVault" },
+      "description": "AES-256-GCM encrypted PII vault for the user."
+    },
+    "/users/{userId}/transactions/{txId}": {
+      "schema": { "$ref": "#/entities/TransactionRecord" },
+      "description": "User transaction ledger with HMAC receipt signatures."
+    },
+    "/users/{userId}/spins/{spinId}": {
+      "schema": { "$ref": "#/entities/SpinRecord" },
+      "description": "User lucky wheel spin history."
+    },
+    "/withdrawals/{withdrawalId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRequest" },
+      "description": "Encrypted payout requests managed by owner and admins."
+    },
+    "/referralCodes/{refCode}": {
+      "schema": { "$ref": "#/entities/ReferralCodeEntry" },
+      "description": "Referral code lookup mapping to owner UID."
+    },
+    "/referralClaims/{claimId}": {
+      "schema": { "$ref": "#/entities/ReferralClaim" },
+      "description": "Atomic referral reward claims between invitee and referrer."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRecord" },
+      "description": "Database-backed admin authorization registry."
+    },
+    "/taskSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/TaskSellSettings" },
+      "description": "Admin-controlled settings documents: 'account_sell' (TaskSellSettings), 'regular_tasks' (RegularTaskSettings), and 'referral_settings' (ReferralSettings)."
+    },
+    "/accountSubmissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/AccountSubmission" },
+      "description": "User-submitted Gmail and Facebook accounts awaiting admin approval or rejection."
+    },
+    "/supportThreads/{userId}": {
+      "schema": { "$ref": "#/entities/SupportThread" },
+      "description": "Live support conversation threads between active/suspended users and admin."
+    },
+    "/supportThreads/{userId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/SupportMessage" },
+      "description": "Live support chat messages within a user thread."
+    },
+    "/test/{docId}": {
+      "schema": { "$ref": "#/entities/ConnectionProbe" },
+      "description": "Firestore connectivity check target."
+    }
+  }
+}

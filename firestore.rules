@@ -1,0 +1,780 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Default-deny global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===== Hardened Global Helpers =====
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedAdmin() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isVerifiedAdmin() && request.auth.token.email == 'incomezone2729@gmail.com';
+    }
+
+    // ===== Entity Validation Blueprints =====
+    function isValidUserAccount(data) {
+      return data.keys().hasAll([
+          'uid', 'name', 'refCode', 'balance', 'totalEarned',
+          'referrals', 'refEarned', 'streakCount', 'dailyDate',
+          'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks',
+          'theme', 'role', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'name', 'refCode', 'referredBy', 'balance', 'totalEarned',
+          'referrals', 'refEarned', 'streakCount', 'streakLast', 'dailyDate',
+          'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks',
+          'theme', 'role', 'suspended', 'suspensionReason', 'suspendedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.refCode is string && data.refCode.size() >= 4 && data.refCode.size() <= 24 && data.refCode.matches('^[A-Z0-9_\\-]+$')
+        && (!('referredBy' in data) || data.referredBy == null || (data.referredBy is string && data.referredBy.size() <= 24))
+        && data.balance is number && data.balance >= 0 && data.balance <= 10000000
+        && data.totalEarned is number && data.totalEarned >= 0 && data.totalEarned <= 10000000
+        && data.referrals is int && data.referrals >= 0 && data.referrals <= 100000
+        && data.refEarned is number && data.refEarned >= 0 && data.refEarned <= 10000000
+        && data.streakCount is int && data.streakCount >= 0 && data.streakCount <= 10000
+        && (!('streakLast' in data) || data.streakLast == null || (data.streakLast is string && data.streakLast.size() <= 16))
+        && data.dailyDate is string && data.dailyDate.size() >= 8 && data.dailyDate.size() <= 16
+        && data.dailySpins is int && data.dailySpins >= 0 && data.dailySpins <= 20
+        && data.dailyAds is int && data.dailyAds >= 0 && data.dailyAds <= 200
+        && data.dailyTodayEarn is number && data.dailyTodayEarn >= 0 && data.dailyTodayEarn <= 100000
+        && data.dailyTasks is map && data.dailyTasks.size() <= 20
+        && data.theme in ['dark', 'light']
+        && data.role in ['user', 'admin']
+        && (!('suspended' in data) || data.suspended is bool)
+        && (!('suspensionReason' in data) || data.suspensionReason == null || (data.suspensionReason is string && data.suspensionReason.size() <= 240))
+        && (!('suspendedAt' in data) || data.suspendedAt == null || data.suspendedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPrivateVault(data) {
+      return data.keys().hasAll([
+          'userId', 'emailMasked', 'encryptedEmail', 'encryptionAlgorithm', 'keyVersion', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'emailMasked', 'encryptedEmail', 'encryptedPhone', 'encryptionAlgorithm', 'keyVersion', 'updatedAt'
+        ])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.emailMasked is string && data.emailMasked.size() >= 3 && data.emailMasked.size() <= 120
+        && data.encryptedEmail is string && data.encryptedEmail.size() >= 10 && data.encryptedEmail.size() <= 2048
+        && (!('encryptedPhone' in data) || data.encryptedPhone == null || (data.encryptedPhone is string && data.encryptedPhone.size() <= 2048))
+        && data.encryptionAlgorithm == 'AES-256-GCM'
+        && data.keyVersion is string && data.keyVersion.size() >= 1 && data.keyVersion.size() <= 16
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['userId', 'type', 'amount', 'title', 'icon', 'receiptId', 'receiptSignature', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'type', 'amount', 'title', 'icon', 'receiptId', 'receiptSignature', 'createdAt'])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.type in ['in', 'out']
+        && data.amount is number && data.amount > 0 && data.amount <= 100000
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.icon is string && data.icon.size() >= 1 && data.icon.size() <= 16
+        && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
+        && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSpin(data) {
+      return data.keys().hasAll(['userId', 'amount', 'prizeIndex', 'receiptId', 'receiptSignature', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'amount', 'prizeIndex', 'receiptId', 'receiptSignature', 'createdAt'])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.amount is number && data.amount > 0 && data.amount <= 2
+        && data.prizeIndex is int && data.prizeIndex >= 0 && data.prizeIndex <= 7
+        && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
+        && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWithdrawal(data) {
+      return data.keys().hasAll([
+          'userId', 'userName', 'method', 'maskedNumber', 'encryptedAccount',
+          'amount', 'status', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'userName', 'method', 'maskedNumber', 'encryptedAccount',
+          'amount', 'status', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
+        && data.method in ['bKash', 'Nagad', 'Rocket']
+        && data.maskedNumber is string && data.maskedNumber.size() >= 6 && data.maskedNumber.size() <= 20
+        && data.encryptedAccount is string && data.encryptedAccount.size() >= 10 && data.encryptedAccount.size() <= 2048
+        && data.amount is number && data.amount >= 100 && data.amount <= 100000
+        && data.status in ['প্রসেসিং', 'সম্পন্ন', 'বাতিল']
+        && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
+        && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReferralCode(data) {
+      return data.keys().hasAll(['refCode', 'ownerId', 'createdAt'])
+        && data.keys().hasOnly(['refCode', 'ownerId', 'createdAt'])
+        && data.refCode is string && data.refCode.size() >= 4 && data.refCode.size() <= 24 && data.refCode.matches('^[A-Z0-9_\\-]+$')
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.createdAt is timestamp;
+    }
+
+    function isValidReferralClaim(data) {
+      return data.keys().hasAll(['referredUid', 'referrerUid', 'refCode', 'amount', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'referredUid', 'referrerUid', 'refCode', 'amount',
+          'friendAmount', 'minTasks', 'qualified', 'friendClaimed',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.referredUid is string && data.referredUid.size() >= 1 && data.referredUid.size() <= 128 && data.referredUid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.referrerUid is string && data.referrerUid.size() >= 1 && data.referrerUid.size() <= 128 && data.referrerUid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.refCode is string && data.refCode.size() >= 4 && data.refCode.size() <= 24 && data.refCode.matches('^[A-Z0-9_\\-]+$')
+        && data.amount is number && data.amount >= 0.5 && data.amount <= 100
+        && (!('friendAmount' in data) || (data.friendAmount is number && data.friendAmount >= 0 && data.friendAmount <= 100))
+        && (!('minTasks' in data) || (data.minTasks is int && data.minTasks >= 0 && data.minTasks <= 10))
+        && (!('qualified' in data) || data.qualified is bool)
+        && (!('friendClaimed' in data) || data.friendClaimed is bool)
+        && data.status in ['pending', 'claimed']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'createdAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 120
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTaskSettings(data) {
+      return data.keys().hasAll([
+          'gmailEnabled', 'gmailPrice', 'gmailPassword',
+          'facebookEnabled', 'facebookPrice', 'facebookPassword', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'gmailEnabled', 'gmailPrice', 'gmailPassword', 'gmailNote',
+          'facebookEnabled', 'facebookPrice', 'facebookPassword', 'facebookNote', 'updatedAt'
+        ])
+        && data.gmailEnabled is bool
+        && data.gmailPrice is number && data.gmailPrice >= 1 && data.gmailPrice <= 100000
+        && data.gmailPassword is string && data.gmailPassword.size() <= 120
+        && (!('gmailNote' in data) || data.gmailNote == null || (data.gmailNote is string && data.gmailNote.size() <= 240))
+        && data.facebookEnabled is bool
+        && data.facebookPrice is number && data.facebookPrice >= 1 && data.facebookPrice <= 100000
+        && data.facebookPassword is string && data.facebookPassword.size() <= 120
+        && (!('facebookNote' in data) || data.facebookNote == null || (data.facebookNote is string && data.facebookNote.size() <= 240))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRegularTaskFields(enabledVal, limitVal, rewardVal, timerVal, urlVal) {
+      return enabledVal is bool
+        && limitVal is int && limitVal >= 0 && limitVal <= 200
+        && rewardVal is number && rewardVal >= 0.05 && rewardVal <= 500
+        && timerVal is int && timerVal >= 0 && timerVal <= 300
+        && urlVal is string && urlVal.size() <= 500
+        && (urlVal.size() == 0 || urlVal.matches('^https?://[^\\s]+$'));
+    }
+
+    function isValidRegularTaskSettings(data) {
+      return data.keys().hasAll([
+          'adEnabled', 'adLimit', 'adReward', 'adTimer', 'adUrl',
+          'articleEnabled', 'articleLimit', 'articleReward', 'articleTimer', 'articleUrl',
+          'quizEnabled', 'quizLimit', 'quizReward', 'quizTimer', 'quizUrl',
+          'surveyEnabled', 'surveyLimit', 'surveyReward', 'surveyTimer', 'surveyUrl',
+          'appEnabled', 'appLimit', 'appReward', 'appTimer', 'appUrl',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'adEnabled', 'adLimit', 'adReward', 'adTimer', 'adUrl',
+          'articleEnabled', 'articleLimit', 'articleReward', 'articleTimer', 'articleUrl',
+          'quizEnabled', 'quizLimit', 'quizReward', 'quizTimer', 'quizUrl',
+          'surveyEnabled', 'surveyLimit', 'surveyReward', 'surveyTimer', 'surveyUrl',
+          'appEnabled', 'appLimit', 'appReward', 'appTimer', 'appUrl',
+          'updatedAt'
+        ])
+        && isValidRegularTaskFields(data.adEnabled, data.adLimit, data.adReward, data.adTimer, data.adUrl)
+        && isValidRegularTaskFields(data.articleEnabled, data.articleLimit, data.articleReward, data.articleTimer, data.articleUrl)
+        && isValidRegularTaskFields(data.quizEnabled, data.quizLimit, data.quizReward, data.quizTimer, data.quizUrl)
+        && isValidRegularTaskFields(data.surveyEnabled, data.surveyLimit, data.surveyReward, data.surveyTimer, data.surveyUrl)
+        && isValidRegularTaskFields(data.appEnabled, data.appLimit, data.appReward, data.appTimer, data.appUrl)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidReferralSettings(data) {
+      return data.keys().hasAll(['referrerBonus', 'friendBonus', 'minTasks', 'updatedAt'])
+        && data.keys().hasOnly(['referrerBonus', 'friendBonus', 'minTasks', 'conditionNote', 'updatedAt'])
+        && data.referrerBonus is number && data.referrerBonus >= 0.5 && data.referrerBonus <= 100
+        && data.friendBonus is number && data.friendBonus >= 0 && data.friendBonus <= 100
+        && data.minTasks is int && data.minTasks >= 0 && data.minTasks <= 10
+        && (!('conditionNote' in data) || data.conditionNote == null || (data.conditionNote is string && data.conditionNote.size() <= 300))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAccountSubmission(data) {
+      return data.keys().hasAll([
+          'userId', 'userName', 'platform', 'maskedIdentifier', 'encryptedCredentials',
+          'amount', 'status', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'userName', 'platform', 'maskedIdentifier', 'encryptedCredentials',
+          'amount', 'status', 'adminNote', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
+        && data.platform in ['gmail', 'facebook']
+        && data.maskedIdentifier is string && data.maskedIdentifier.size() >= 3 && data.maskedIdentifier.size() <= 120
+        && data.encryptedCredentials is string && data.encryptedCredentials.size() >= 10 && data.encryptedCredentials.size() <= 2048
+        && data.amount is number && data.amount >= 1 && data.amount <= 100000
+        && data.status in ['পেন্ডিং', 'এপ্রুভড', 'রিজেক্টেড']
+        && (!('adminNote' in data) || data.adminNote == null || (data.adminNote is string && data.adminNote.size() <= 200))
+        && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
+        && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSupportThread(data) {
+      return data.keys().hasAll([
+          'userId', 'userName', 'userRefCode', 'userSuspended', 'lastMessage',
+          'lastSender', 'unreadByAdmin', 'unreadByUser', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'userName', 'userRefCode', 'userSuspended', 'lastMessage',
+          'lastSender', 'unreadByAdmin', 'unreadByUser', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
+        && data.userRefCode is string && data.userRefCode.size() >= 4 && data.userRefCode.size() <= 24 && data.userRefCode.matches('^[A-Z0-9_\\-]+$')
+        && data.userSuspended is bool
+        && data.lastMessage is string && data.lastMessage.size() >= 1 && data.lastMessage.size() <= 500
+        && data.lastSender in ['user', 'admin']
+        && data.unreadByAdmin is int && data.unreadByAdmin >= 0 && data.unreadByAdmin <= 100000
+        && data.unreadByUser is int && data.unreadByUser >= 0 && data.unreadByUser <= 100000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSupportMessage(data) {
+      return data.keys().hasAll([
+          'threadId', 'senderId', 'senderRole', 'senderName', 'text', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'threadId', 'senderId', 'senderRole', 'senderName', 'text', 'createdAt'
+        ])
+        && data.threadId is string && data.threadId.size() >= 1 && data.threadId.size() <= 128 && data.threadId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 && data.senderId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.senderRole in ['user', 'admin']
+        && data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 1000
+        && data.createdAt is timestamp;
+    }
+
+    function isNotSuspendedExisting() {
+      return !('suspended' in existing()) || existing().suspended == false;
+    }
+
+    function sameMoneyDelta(aNew, aOld, bNew, bOld) {
+      return (aNew - aOld) - (bNew - bOld) <= 0.001
+        && (bNew - bOld) - (aNew - aOld) <= 0.001;
+    }
+
+    function sameStreakState() {
+      return incoming().streakCount == existing().streakCount
+        && (
+          ('streakLast' in existing() && incoming().streakLast == existing().streakLast)
+          || (!('streakLast' in existing()) && (!('streakLast' in incoming()) || incoming().streakLast == null))
+        );
+    }
+
+    function streakAdvancedToday() {
+      return incoming().streakLast == incoming().dailyDate
+        && (!('streakLast' in existing()) || existing().streakLast != incoming().dailyDate)
+        && (incoming().streakCount == 1 || incoming().streakCount == existing().streakCount + 1);
+    }
+
+    function isDailyCounterRolloverAction() {
+      return incoming().dailyDate != existing().dailyDate
+        && incoming().balance == existing().balance
+        && incoming().totalEarned == existing().totalEarned
+        && sameStreakState()
+        && incoming().dailySpins == 0
+        && incoming().dailyAds == 0
+        && incoming().dailyTodayEarn == 0
+        && incoming().dailyTasks.size() == 0;
+    }
+
+    function isDailyCheckinAction() {
+      return incoming().balance > existing().balance
+        && incoming().balance <= existing().balance + 1
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
+        && streakAdvancedToday()
+        && (
+          incoming().dailyDate == existing().dailyDate
+            ? (
+              incoming().dailySpins == existing().dailySpins
+              && incoming().dailyAds == existing().dailyAds
+              && incoming().dailyTasks == existing().dailyTasks
+              && sameMoneyDelta(incoming().dailyTodayEarn, existing().dailyTodayEarn, incoming().balance, existing().balance)
+            )
+            : (
+              incoming().dailySpins == 0
+              && incoming().dailyAds == 0
+              && incoming().dailyTasks.size() == 0
+              && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
+            )
+        );
+    }
+
+    function isTaskEarningAction() {
+      return incoming().balance > existing().balance
+        && incoming().balance <= existing().balance + 500
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
+        && sameStreakState()
+        && (
+          incoming().dailyDate == existing().dailyDate
+            ? (
+              incoming().dailySpins == existing().dailySpins
+              && incoming().dailyAds >= existing().dailyAds
+              && incoming().dailyAds <= existing().dailyAds + 1
+              && incoming().dailyTasks != existing().dailyTasks
+              && incoming().dailyTasks.size() >= existing().dailyTasks.size()
+              && sameMoneyDelta(incoming().dailyTodayEarn, existing().dailyTodayEarn, incoming().balance, existing().balance)
+            )
+            : (
+              incoming().dailySpins == 0
+              && incoming().dailyAds >= 0
+              && incoming().dailyAds <= 1
+              && incoming().dailyTasks.size() == 1
+              && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
+            )
+        );
+    }
+
+    function isSpinEarningAction() {
+      return incoming().balance > existing().balance
+        && incoming().balance <= existing().balance + 2
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
+        && sameStreakState()
+        && (
+          incoming().dailyDate == existing().dailyDate
+            ? (
+              incoming().dailySpins == existing().dailySpins + 1
+              && incoming().dailyAds == existing().dailyAds
+              && incoming().dailyTasks == existing().dailyTasks
+              && sameMoneyDelta(incoming().dailyTodayEarn, existing().dailyTodayEarn, incoming().balance, existing().balance)
+            )
+            : (
+              incoming().dailySpins == 1
+              && incoming().dailyAds == 0
+              && incoming().dailyTasks.size() == 0
+              && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
+            )
+        );
+    }
+
+    // ===== Action Helpers for UserAccount =====
+    function isProfileOrThemeAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'theme', 'updatedAt'])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    function isEarningAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'balance', 'totalEarned', 'streakCount', 'streakLast',
+          'dailyDate', 'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks', 'updatedAt'
+        ])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isDailyCounterRolloverAction()
+          || isDailyCheckinAction()
+          || isTaskEarningAction()
+          || isSpinEarningAction()
+        );
+    }
+
+    function isReferralClaimAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'balance', 'totalEarned', 'referrals', 'refEarned', 'updatedAt'
+        ])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().referrals == existing().referrals + 1
+        && incoming().refEarned >= existing().refEarned + 0.5
+        && incoming().refEarned <= existing().refEarned + 100
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().refEarned, existing().refEarned);
+    }
+
+    function isFriendReferralBonusAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'balance', 'totalEarned', 'updatedAt'
+        ])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().balance > existing().balance
+        && incoming().balance <= existing().balance + 100
+        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
+        && existsAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid)).data.referredUid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid)).data.qualified == true
+        && getAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid)).data.friendClaimed == true
+        && sameMoneyDelta(
+          incoming().balance,
+          existing().balance,
+          getAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid)).data.friendAmount,
+          0
+        );
+    }
+
+    function isWithdrawalDeductionAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly(['balance', 'updatedAt'])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().balance < existing().balance
+        && (existing().balance - incoming().balance) >= 100
+        && (existing().balance - incoming().balance) <= 100000;
+    }
+
+    function isAdminUserAdjustmentAction() {
+      return incoming().diff(existing()).affectedKeys().hasOnly([
+          'balance', 'totalEarned', 'referrals', 'refEarned', 'dailyDate', 'dailyTodayEarn',
+          'suspended', 'suspensionReason', 'suspendedAt', 'updatedAt'
+        ])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    // ===== Collections =====
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserAccount(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().role == 'user'
+        && (!('suspended' in incoming()) || incoming().suspended == false)
+        && incoming().referrals == 0
+        && incoming().refEarned == 0
+        && incoming().balance == 0
+        && incoming().totalEarned == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isSignedIn()
+        && isValidUserAccount(incoming())
+        && (
+          (isAdmin() && isAdminUserAdjustmentAction())
+          || (isOwner(userId) && (
+            isProfileOrThemeAction()
+            || isEarningAction()
+            || isReferralClaimAction()
+            || isFriendReferralBonusAction()
+            || isWithdrawalDeductionAction()
+          ))
+        );
+
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && docId == 'vault' && (isOwner(userId) || isAdmin());
+        allow list: if false;
+        allow create: if isValidId(userId) && isValidId(docId) && docId == 'vault'
+          && isOwner(userId)
+          && isValidPrivateVault(incoming())
+          && incoming().userId == request.auth.uid
+          && incoming().updatedAt == request.time;
+        allow update: if isValidId(userId) && isValidId(docId) && docId == 'vault'
+          && isOwner(userId)
+          && isValidPrivateVault(incoming())
+          && incoming().userId == existing().userId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['emailMasked', 'encryptedEmail', 'encryptedPhone', 'keyVersion', 'updatedAt']);
+        allow delete: if false;
+      }
+
+      match /transactions/{txId} {
+        allow get: if isValidId(userId) && isValidId(txId) && (isOwner(userId) || isAdmin());
+        allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isValidId(userId) && isValidId(txId)
+          && (isOwner(userId) || isAdmin())
+          && isValidTransaction(incoming())
+          && incoming().userId == userId
+          && incoming().createdAt == request.time;
+        allow update, delete: if false;
+      }
+
+      match /spins/{spinId} {
+        allow get: if isValidId(userId) && isValidId(spinId) && (isOwner(userId) || isAdmin());
+        allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isValidId(userId) && isValidId(spinId)
+          && isOwner(userId)
+          && isValidSpin(incoming())
+          && incoming().userId == request.auth.uid
+          && incoming().createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    match /withdrawals/{withdrawalId} {
+      allow get: if isValidId(withdrawalId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow create: if isValidId(withdrawalId)
+        && isSignedIn()
+        && isValidWithdrawal(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'প্রসেসিং'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(withdrawalId)
+        && isAdmin()
+        && isValidWithdrawal(incoming())
+        && existing().status == 'প্রসেসিং'
+        && incoming().status in ['সম্পন্ন', 'বাতিল']
+        && incoming().userId == existing().userId
+        && incoming().amount == existing().amount
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    match /referralCodes/{refCode} {
+      allow get: if isValidId(refCode) && isSignedIn();
+      allow list: if false;
+      allow create: if isValidId(refCode)
+        && isSignedIn()
+        && isValidReferralCode(incoming())
+        && incoming().refCode == refCode
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /referralClaims/{claimId} {
+      allow get: if isValidId(claimId) && isSignedIn()
+        && (existing().referredUid == request.auth.uid || existing().referrerUid == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && (resource.data.referrerUid == request.auth.uid || resource.data.referredUid == request.auth.uid));
+      allow create: if isValidId(claimId)
+        && claimId == request.auth.uid
+        && isSignedIn()
+        && isValidReferralClaim(incoming())
+        && 'friendAmount' in incoming()
+        && 'minTasks' in incoming()
+        && 'qualified' in incoming()
+        && 'friendClaimed' in incoming()
+        && incoming().referredUid == request.auth.uid
+        && incoming().referrerUid != request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().friendClaimed == false
+        && incoming().qualified == (incoming().minTasks == 0)
+        && (
+          (!exists(/databases/$(database)/documents/taskSettings/referral_settings)
+            && incoming().amount == 2
+            && incoming().friendAmount == 1
+            && incoming().minTasks == 1)
+          || (exists(/databases/$(database)/documents/taskSettings/referral_settings)
+            && incoming().amount == get(/databases/$(database)/documents/taskSettings/referral_settings).data.referrerBonus
+            && incoming().friendAmount == get(/databases/$(database)/documents/taskSettings/referral_settings).data.friendBonus
+            && incoming().minTasks == get(/databases/$(database)/documents/taskSettings/referral_settings).data.minTasks)
+        )
+        && exists(/databases/$(database)/documents/referralCodes/$(incoming().refCode))
+        && get(/databases/$(database)/documents/referralCodes/$(incoming().refCode)).data.ownerId == incoming().referrerUid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(claimId)
+        && isSignedIn()
+        && isValidReferralClaim(incoming())
+        && incoming().referrerUid == existing().referrerUid
+        && incoming().referredUid == existing().referredUid
+        && incoming().refCode == existing().refCode
+        && incoming().amount == existing().amount
+        && (!('friendAmount' in existing()) || incoming().friendAmount == existing().friendAmount)
+        && (!('minTasks' in existing()) || incoming().minTasks == existing().minTasks)
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().referrerUid == request.auth.uid
+            && existing().status == 'pending'
+            && incoming().status == 'claimed'
+            && (!('qualified' in existing()) || existing().qualified == true)
+            && (!('qualified' in existing()) || incoming().qualified == existing().qualified)
+            && (!('friendClaimed' in existing()) || incoming().friendClaimed == existing().friendClaimed)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          || (
+            existing().referredUid == request.auth.uid
+            && incoming().status == existing().status
+            && (!('qualified' in existing()) || existing().qualified == false || incoming().qualified == true)
+            && (!('friendClaimed' in existing()) || existing().friendClaimed == false || incoming().friendClaimed == true)
+            && (incoming().friendClaimed == false || incoming().qualified == true)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['qualified', 'friendClaimed', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /taskSettings/{settingId} {
+      allow get: if isValidId(settingId)
+        && (settingId == 'account_sell' || settingId == 'regular_tasks' || settingId == 'referral_settings')
+        && isSignedIn();
+      allow list: if false;
+      allow create, update: if isValidId(settingId)
+        && isAdmin()
+        && incoming().updatedAt == request.time
+        && (
+          (settingId == 'account_sell' && isValidTaskSettings(incoming()))
+          || (settingId == 'regular_tasks' && isValidRegularTaskSettings(incoming()))
+          || (settingId == 'referral_settings' && isValidReferralSettings(incoming()))
+        );
+      allow delete: if false;
+    }
+
+    match /accountSubmissions/{submissionId} {
+      allow get: if isValidId(submissionId) && isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow create: if isValidId(submissionId)
+        && isSignedIn()
+        && isValidAccountSubmission(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'পেন্ডিং'
+        && (!('adminNote' in incoming()) || incoming().adminNote == null)
+        && (
+          !exists(/databases/$(database)/documents/taskSettings/account_sell)
+          || (incoming().platform == 'gmail' && get(/databases/$(database)/documents/taskSettings/account_sell).data.gmailEnabled == true)
+          || (incoming().platform == 'facebook' && get(/databases/$(database)/documents/taskSettings/account_sell).data.facebookEnabled == true)
+        )
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(submissionId)
+        && isAdmin()
+        && isValidAccountSubmission(incoming())
+        && existing().status == 'পেন্ডিং'
+        && incoming().status in ['এপ্রুভড', 'রিজেক্টেড']
+        && incoming().userId == existing().userId
+        && incoming().platform == existing().platform
+        && incoming().amount == existing().amount
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'adminNote', 'updatedAt']);
+
+      allow delete: if false;
+    }
+
+    match /supportThreads/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+      allow create: if isValidId(userId)
+        && isValidSupportThread(incoming())
+        && incoming().userId == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(userId) && incoming().lastSender == 'user' && incoming().unreadByUser == 0)
+          || (isAdmin() && incoming().lastSender == 'admin' && incoming().unreadByAdmin == 0)
+        );
+
+      allow update: if isValidId(userId)
+        && isSignedIn()
+        && isValidSupportThread(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'userName', 'userSuspended', 'lastMessage', 'lastSender', 'unreadByAdmin', 'unreadByUser', 'updatedAt'
+            ])
+            && incoming().unreadByUser == 0
+            && (incoming().lastSender == 'user' || incoming().lastSender == existing().lastSender)
+          )
+          || (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'userSuspended', 'lastMessage', 'lastSender', 'unreadByAdmin', 'unreadByUser', 'updatedAt'
+            ])
+            && incoming().unreadByAdmin == 0
+          )
+        );
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow list: if isAdmin() || (isSignedIn() && resource.data.threadId == request.auth.uid);
+        allow create: if isValidId(userId)
+          && isValidId(messageId)
+          && isSignedIn()
+          && isValidSupportMessage(incoming())
+          && incoming().threadId == userId
+          && incoming().senderId == request.auth.uid
+          && incoming().createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/supportThreads/$(userId))
+          && (
+            (isOwner(userId) && incoming().senderRole == 'user')
+            || (isAdmin() && incoming().senderRole == 'admin')
+          );
+        allow update, delete: if false;
+      }
+    }
+
+    match /test/{docId} {
+      allow get: if isValidId(docId) && docId == 'connection';
+      allow list, write: if false;
+    }
+  }
+}

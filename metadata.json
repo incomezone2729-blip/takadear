@@ -1,0 +1,6 @@
+{
+  "name": "TakaDear — টাকাডিয়ার",
+  "description": "Firebase-connected Bengali rewards, tasks, lucky spin, and encrypted wallet application for TakaDear (com.takadear.app).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
