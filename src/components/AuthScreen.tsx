@@ -132,9 +132,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     <main className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-4 sm:p-8">
       <div className="w-full max-w-md space-y-5">
         <header className="flex items-center justify-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-[var(--primary)] text-white flex items-center justify-center text-2xl font-bold shadow-md">
-            ৳
-          </div>
+          <img
+            src="/logo.png"
+            alt="টাকাডিয়ার লোগো"
+            className="w-14 h-14 rounded-2xl object-cover shadow-md border border-[var(--border)] bg-white/10"
+          />
           <div>
             <h1 className="text-xl font-bold tracking-tight leading-tight">টাকাডিয়ার (TakaDear)</h1>
             <p className="text-xs text-[var(--muted)]">দৈনিক টাস্ক, স্পিন ও রিওয়ার্ড ওয়ালেট</p>

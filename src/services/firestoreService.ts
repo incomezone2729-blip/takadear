@@ -205,11 +205,35 @@ function enqueueWalletOp<T>(uid: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function getUserDocPreferServer(userRef: ReturnType<typeof doc>) {
+async function getUserDocPreferServer(userRef: ReturnType<typeof doc>, maxRetries = 3) {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await getDocFromServer(userRef);
+    } catch (serverErr) {
+      lastErr = serverErr;
+      // If document is present in local cache, return it
+      try {
+        const cached = await getDoc(userRef);
+        if (cached.exists()) {
+          return cached;
+        }
+      } catch {
+        // Not in local cache
+      }
+
+      // If client is still establishing backend connection, backoff and retry
+      if (attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
+      }
+    }
+  }
+
+  // Final fallback
   try {
-    return await getDocFromServer(userRef);
-  } catch {
     return await getDoc(userRef);
+  } catch (finalErr) {
+    throw lastErr || finalErr;
   }
 }
 

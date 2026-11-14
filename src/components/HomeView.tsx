@@ -1,6 +1,7 @@
 import React from 'react';
 import { Gift, Tv, Landmark, Users, Flame, Check, Mail, MessageCircle } from 'lucide-react';
 import { FacebookLogo } from './FacebookLogo';
+import { PWAInstallButton } from './PWAInstallButton';
 import type { TransactionRecord, UserAccount } from '../services/firestoreService';
 import {
   DEFAULT_ACCOUNT_SELL_SETTINGS,
@@ -147,6 +148,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </button>
         </section>
       </div>
+
+      {/* PWA Install Banner (automatically hidden when already running as installed app) */}
+      <PWAInstallButton variant="banner" />
 
       {/* Quick Actions */}
       <section aria-label="দ্রুত কাজ">

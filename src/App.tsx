@@ -88,6 +88,7 @@ import { AccountSellPage } from './components/AccountSellPage';
 import { LiveSupportChat } from './components/LiveSupportChat';
 import { Modal } from './components/Modal';
 import { Toast, type ToastVariant } from './components/Toast';
+import { PWAInstallButton } from './components/PWAInstallButton';
 
 function mapAuthErrorToBn(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
@@ -151,6 +152,7 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [busy, setBusy] = useState(false);
+  const [hydrateError, setHydrateError] = useState<string | null>(null);
 
   const [rewardModal, setRewardModal] = useState<{ title: string; body: string } | null>(null);
   const [toastState, setToastState] = useState<{ message: string | null; variant: ToastVariant }>({
@@ -292,8 +294,20 @@ export default function App() {
             );
           }
         }
+        setHydrateError(null);
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'ডাটা লোড ব্যর্থ হয়েছে', 'err');
+        const msg = err instanceof Error ? err.message : String(err);
+        let friendly = 'ডাটা লোড ব্যর্থ হয়েছে';
+        if (
+          msg.includes('client is offline') ||
+          msg.includes('unavailable') ||
+          msg.includes('network') ||
+          msg.includes('offline')
+        ) {
+          friendly = 'সার্ভারের সাথে সংযোগ সাময়িকভাবে বিচ্ছিন্ন। অনুগ্রহ করে ইন্টারনেট সংযোগ পরীক্ষা করে পুনরায় চেষ্টা করুন।';
+        }
+        setHydrateError(friendly);
+        showToast(friendly, 'err');
       } finally {
         setBusy(false);
       }
@@ -317,6 +331,7 @@ export default function App() {
         autoOpenedAdminUidRef.current = null;
         setAccount(null);
         setVault(null);
+        setHydrateError(null);
         setTransactions([]);
         setSpins([]);
         setWithdrawals([]);
@@ -555,10 +570,12 @@ export default function App() {
 
   if (booting || !authResolved) {
     return (
-      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6">
-        <div className="w-20 h-20 rounded-3xl bg-[var(--primary)] text-white flex items-center justify-center text-4xl font-bold shadow-xl mb-5">
-          ৳
-        </div>
+      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6 text-center">
+        <img
+          src="/logo.png"
+          alt="টাকাডিয়ার"
+          className="w-24 h-24 rounded-3xl object-cover shadow-2xl mb-5 border border-[var(--border)] bg-white/10"
+        />
         <h1 className="text-2xl font-bold">টাকাডিয়ার (TakaDear)</h1>
         <p className="text-xs text-[var(--muted)] mt-1">
           অ্যাপ লোড হচ্ছে...
@@ -610,8 +627,46 @@ export default function App() {
 
   if (!account) {
     return (
-      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6">
-        <p className="text-sm font-medium text-[var(--muted)]">আপনার অ্যাকাউন্ট লোড হচ্ছে...</p>
+      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6 text-center">
+        {hydrateError ? (
+          <div className="max-w-md w-full p-6 sm:p-7 rounded-3xl bg-[var(--surface)] border border-rose-500/30 shadow-2xl space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto text-2xl font-bold">
+              ⚠
+            </div>
+            <h2 className="text-lg font-bold text-[var(--text)]">সার্ভার সংযোগ সমস্যা</h2>
+            <p className="text-xs text-[var(--muted)] leading-relaxed">{hydrateError}</p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setHydrateError(null);
+                  if (firebaseUser) void hydrateUserSession(firebaseUser);
+                }}
+                className="flex-1 min-h-[44px] rounded-xl bg-[var(--primary)] text-white text-xs font-bold cursor-pointer hover:opacity-90 shadow-md transition-all active:scale-95"
+              >
+                পুনরায় চেষ্টা করুন
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="min-h-[44px] px-5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] text-xs font-semibold cursor-pointer transition-colors"
+              >
+                লগআউট
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center space-y-4">
+            <img
+              src="/logo.png"
+              alt="টাকাডিয়ার"
+              className="w-16 h-16 rounded-2xl object-cover shadow-lg border border-[var(--border)] bg-white/10"
+            />
+            <p className="text-sm font-medium text-[var(--muted)] animate-pulse">
+              আপনার অ্যাকাউন্ট লোড হচ্ছে...
+            </p>
+          </div>
+        )}
       </div>
     );
   }
@@ -735,12 +790,14 @@ export default function App() {
       <aside className="hidden lg:flex lg:w-64 lg:flex-col lg:shrink-0 bg-[var(--surface)] border-r border-[var(--border)] p-5 justify-between">
         <div>
           <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="w-10 h-10 rounded-xl bg-[var(--primary)] text-white flex items-center justify-center font-bold text-lg">
-              ৳
-            </div>
+            <img
+              src="/logo.png"
+              alt="টাকাডিয়ার"
+              className="w-11 h-11 rounded-xl object-cover shadow-sm border border-[var(--border)] bg-white/10 shrink-0"
+            />
             <div>
               <p className="text-base font-bold leading-tight">টাকাডিয়ার</p>
-              <p className="text-[11px] text-[var(--muted)]">TakaDear Secure</p>
+              <p className="text-[11px] text-[var(--muted)]">TakaDear Platform</p>
             </div>
           </div>
 
@@ -797,11 +854,14 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs space-y-1">
-          <p className="font-semibold text-[var(--text)] truncate">{account.name}</p>
-          <p className="text-[var(--muted)] font-mono-num">
-            লেভেল {toBn(level)} · AES-256-GCM
-          </p>
+        <div className="space-y-3">
+          <PWAInstallButton variant="sidebar" />
+          <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs space-y-1">
+            <p className="font-semibold text-[var(--text)] truncate">{account.name}</p>
+            <p className="text-[var(--muted)] font-mono-num">
+              লেভেল {toBn(level)} · AES-256-GCM
+            </p>
+          </div>
         </div>
       </aside>
 
@@ -809,9 +869,11 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-8">
         <header className="sticky top-0 z-30 h-14 bg-[var(--surface)]/95 backdrop-blur-md border-b border-[var(--border)] px-4 sm:px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-[var(--primary)] text-white flex items-center justify-center font-bold text-sm shrink-0 lg:hidden">
-              {account.name.charAt(0)}
-            </div>
+            <img
+              src="/logo.png"
+              alt="টাকাডিয়ার"
+              className="w-9 h-9 rounded-xl object-cover shadow-sm border border-[var(--border)] bg-white/10 shrink-0 lg:hidden"
+            />
             <div className="min-w-0">
               <p className="text-sm font-bold truncate">{account.name}</p>
               <p className="text-[11px] text-[var(--muted)] truncate">
@@ -821,6 +883,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
+            <PWAInstallButton variant="header" />
             <button
               type="button"
               onClick={() => setPage('support')}

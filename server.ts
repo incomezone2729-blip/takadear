@@ -342,6 +342,19 @@ async function createServer() {
     });
   });
 
+  const publicDir = path.resolve(__dirname, 'public');
+  if (fs.existsSync(publicDir)) {
+    app.use(
+      express.static(publicDir, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.webmanifest')) {
+            res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+          }
+        },
+      })
+    );
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

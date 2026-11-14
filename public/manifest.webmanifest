@@ -1,0 +1,32 @@
+{
+  "name": "টাকাডিয়ার - TakaDear",
+  "short_name": "টাকাডিয়ার",
+  "description": "টাকাডিয়ার - বিশ্বস্ত অনলাইন রিওয়ার্ড, স্পিন ও আর্নিং প্ল্যাটফর্ম",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0d17",
+  "theme_color": "#0b0d17",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

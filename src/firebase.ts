@@ -1,10 +1,16 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { doc, getDocFromServer, initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(
+  app,
+  {
+    experimentalAutoDetectLongPolling: true,
+  },
+  firebaseConfig.firestoreDatabaseId
+);
 export const auth = getAuth(app);
 
 export enum OperationType {
@@ -61,18 +67,25 @@ export function handleFirestoreError(
 
 export type ConnectionState = 'checking' | 'connected' | 'offline';
 
-export async function testConnection(): Promise<ConnectionState> {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    return 'connected';
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-      return 'offline';
+export async function testConnection(maxRetries = 2): Promise<ConnectionState> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+      return 'connected';
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 600));
+          continue;
+        }
+        console.error('Please check your Firebase configuration.');
+        return 'offline';
+      }
+      // Permission error or missing doc still confirms server reachability
+      return 'connected';
     }
-    // Permission error or missing doc still confirms server reachability
-    return 'connected';
   }
+  return 'offline';
 }
 
 void testConnection();
