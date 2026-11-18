@@ -7,19 +7,18 @@ import {
   decryptSensitiveData,
   encryptSensitiveData,
   signTransactionPayload,
-} from './src/server/crypto';
+} from './src/server/crypto.ts';
 import {
   verifyFirebaseIdToken,
   type VerifiedFirebaseToken,
-} from './src/server/firebaseAuthVerify';
+} from './src/server/firebaseAuthVerify.ts';
 import {
   ADMIN_ONLY_TELEGRAM_EVENTS,
   sendTelegramNotification,
   validateTelegramNotificationBody,
   type TelegramNotificationPayload,
-} from './src/server/telegram';
+} from './src/server/telegram.ts';
 import {
-  CONTROLLABLE_TASK_IDS,
   isAdminEmail,
   maskEmail,
   maskPhoneNumber,
@@ -27,9 +26,7 @@ import {
   REFERRAL_BONUS,
   SIGNUP_BONUS,
   STREAK_BONUS,
-  WHEEL_SEGMENTS,
-  type ControllableTaskId,
-} from './src/utils/takadearLogic';
+} from './src/utils/takadearLogic.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -246,24 +243,10 @@ async function createServer() {
     ) {
       valid = true;
     } else if (
-      action === 'task' &&
-      taskId &&
-      CONTROLLABLE_TASK_IDS.includes(taskId as ControllableTaskId)
-    ) {
-      valid = numericAmount >= 0.05 && numericAmount <= 500;
-    } else if (
-      action === 'spin' &&
-      typeof prizeIndex === 'number' &&
-      prizeIndex >= 0 &&
-      prizeIndex < WHEEL_SEGMENTS.length &&
-      WHEEL_SEGMENTS[prizeIndex].v === numericAmount
-    ) {
-      valid = true;
-    } else if (
       action === 'withdrawal' &&
       numericAmount >= MIN_WITHDRAW &&
-      numericAmount <= 100000 &&
-      (method === 'bKash' || method === 'Nagad' || method === 'Rocket')
+      numericAmount <= 150000 &&
+      method === 'bKash'
     ) {
       valid = true;
     } else if (
@@ -277,7 +260,7 @@ async function createServer() {
       (action === 'admin_adjust' || action === 'account_approve') &&
       checkCallerIsAdmin(user)
     ) {
-      valid = numericAmount >= 0.05 && numericAmount <= 100000;
+      valid = numericAmount >= 0.05 && numericAmount <= 150000;
     }
 
     if (!valid) {

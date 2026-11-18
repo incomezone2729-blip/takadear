@@ -15,7 +15,6 @@ import {
   Ban,
   CheckSquare,
   CreditCard,
-  Disc3,
   Home,
   LogOut,
   MessageCircle,
@@ -32,27 +31,25 @@ import {
 } from './services/secureApi';
 import {
   claimPendingReferrals,
-  completeEarningTask,
   ensureUserAccount,
   evaluateAndClaimInviteeReferral,
   fetchAccountSellSettings,
   fetchReferralSettings,
-  fetchRegularTaskSettings,
+  fetchUserAccountSnapshot,
   fetchUserAccountSubmissions,
   fetchUserActivity,
+  fetchWithdrawalSettings,
   performDailyCheckin,
-  recordSpinWin,
   submitAccountForSale,
   submitEncryptedWithdrawal,
   subscribeAccountSellSettings,
   subscribeReferralSettings,
-  subscribeRegularTaskSettings,
   subscribeUserAccount,
   subscribeUserSupportThread,
+  subscribeWithdrawalSettings,
   updateUserTheme,
   type AccountSubmissionRecord,
   type InviteeReferralStatus,
-  type SpinRecord,
   type SupportThreadRecord,
   type TransactionRecord,
   type UserAccount,
@@ -63,24 +60,23 @@ import {
   calculateUserLevel,
   DEFAULT_ACCOUNT_SELL_SETTINGS,
   DEFAULT_REFERRAL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
+  DEFAULT_WITHDRAWAL_SETTINGS,
   fmtAmount,
   fmtBnReward,
+  formatAppErrorMessage,
   isAdminEmail,
   toBn,
   type AccountPlatform,
   type AccountSellSettingsConfig,
   type PaymentMethod,
   type ReferralSettingsConfig,
-  type RegularTaskSettingsMap,
-  type TaskConfig,
   type ThemeMode,
+  type WithdrawalSettingsConfig,
 } from './utils/takadearLogic';
 import { AuthScreen } from './components/AuthScreen';
 import { EmailVerificationScreen } from './components/EmailVerificationScreen';
 import { HomeView, type NavPage } from './components/HomeView';
 import { TasksView } from './components/TasksView';
-import { SpinView } from './components/SpinView';
 import { WalletView } from './components/WalletView';
 import { ProfileView } from './components/ProfileView';
 import { AdminView } from './components/AdminView';
@@ -88,7 +84,6 @@ import { AccountSellPage } from './components/AccountSellPage';
 import { LiveSupportChat } from './components/LiveSupportChat';
 import { Modal } from './components/Modal';
 import { Toast, type ToastVariant } from './components/Toast';
-import { PWAInstallButton } from './components/PWAInstallButton';
 
 function mapAuthErrorToBn(err: unknown): string {
   const code = (err as { code?: string })?.code || '';
@@ -109,8 +104,7 @@ function mapAuthErrorToBn(err: unknown): string {
 
 const NAV_ITEMS: Array<{ id: NavPage; label: string; Icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'home', label: 'হোম', Icon: Home },
-  { id: 'tasks', label: 'টাস্ক', Icon: CheckSquare },
-  { id: 'spin', label: 'স্পিন', Icon: Disc3 },
+  { id: 'tasks', label: 'কাজ', Icon: CheckSquare },
   { id: 'wallet', label: 'ওয়ালেট', Icon: CreditCard },
   { id: 'profile', label: 'প্রোফাইল', Icon: UserIcon },
 ];
@@ -127,20 +121,15 @@ export default function App() {
   const [account, setAccount] = useState<UserAccount | null>(null);
   const [vault, setVault] = useState<UserPrivateVault | null>(null);
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
-  const [spins, setSpins] = useState<SpinRecord[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalRecord[]>([]);
   const [accountSellSettings, setAccountSellSettings] = useState<AccountSellSettingsConfig>({
     ...DEFAULT_ACCOUNT_SELL_SETTINGS,
   });
-  const [regularTaskSettings, setRegularTaskSettings] = useState<RegularTaskSettingsMap>({
-    ad: { ...DEFAULT_REGULAR_TASK_SETTINGS.ad },
-    article: { ...DEFAULT_REGULAR_TASK_SETTINGS.article },
-    quiz: { ...DEFAULT_REGULAR_TASK_SETTINGS.quiz },
-    survey: { ...DEFAULT_REGULAR_TASK_SETTINGS.survey },
-    app: { ...DEFAULT_REGULAR_TASK_SETTINGS.app },
-  });
   const [referralSettings, setReferralSettings] = useState<ReferralSettingsConfig>({
     ...DEFAULT_REFERRAL_SETTINGS,
+  });
+  const [withdrawalSettings, setWithdrawalSettings] = useState<WithdrawalSettingsConfig>({
+    ...DEFAULT_WITHDRAWAL_SETTINGS,
   });
   const [inviteeStatus, setInviteeStatus] = useState<InviteeReferralStatus | null>(null);
   const [accountSubmissions, setAccountSubmissions] = useState<AccountSubmissionRecord[]>([]);
@@ -152,7 +141,6 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [busy, setBusy] = useState(false);
-  const [hydrateError, setHydrateError] = useState<string | null>(null);
 
   const [rewardModal, setRewardModal] = useState<{ title: string; body: string } | null>(null);
   const [toastState, setToastState] = useState<{ message: string | null; variant: ToastVariant }>({
@@ -162,6 +150,7 @@ export default function App() {
 
   const pendingSignupMetaRef = useRef<{ name?: string; refCode?: string }>({});
   const autoOpenedAdminUidRef = useRef<string | null>(null);
+  const wasSignedOutRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
   const walletActionLockRef = useRef(false);
   const accountRef = useRef<UserAccount | null>(null);
@@ -172,9 +161,12 @@ export default function App() {
   const showToast = useCallback((message: string, variant: ToastVariant = 'default') => {
     setToastState({ message, variant });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => {
-      setToastState({ message: null, variant: 'default' });
-    }, 2800);
+    toastTimerRef.current = window.setTimeout(
+      () => {
+        setToastState({ message: null, variant: 'default' });
+      },
+      variant === 'err' ? 4500 : 2800
+    );
   }, []);
 
   // Sync theme on <html> element
@@ -220,7 +212,7 @@ export default function App() {
         const meta = pendingSignupMetaRef.current;
         pendingSignupMetaRef.current = {};
 
-        const [sessionRes, ensured, sellCfg, regTaskCfg, refCfg, subs] = await Promise.all([
+        const [sessionRes, ensured, sellCfg, refCfg, wdCfg, subs] = await Promise.all([
           verifyServerSession().catch(() => ({
             verified: false,
             isAdmin: user.emailVerified && isAdminEmail(user.email),
@@ -230,8 +222,8 @@ export default function App() {
             referredBy: meta.refCode || initialRefCode,
           }),
           fetchAccountSellSettings(),
-          fetchRegularTaskSettings(),
           fetchReferralSettings(),
+          fetchWithdrawalSettings(),
           fetchUserAccountSubmissions(user.uid).catch(() => []),
         ]);
 
@@ -261,11 +253,10 @@ export default function App() {
         setVault(finalEnsure.vault);
         setTheme(finalEnsure.account.theme || 'dark');
         setTransactions(activity.transactions);
-        setSpins(activity.spins);
         setWithdrawals(activity.withdrawals);
         setAccountSellSettings(sellCfg);
-        setRegularTaskSettings(regTaskCfg);
         setReferralSettings(refCfg);
+        setWithdrawalSettings(wdCfg);
         setInviteeStatus(inviteeRes.status);
         setAccountSubmissions(subs);
         setIsAdmin(resolvedAdmin);
@@ -281,7 +272,7 @@ export default function App() {
             body:
               inviteeRes.unlockedBonus > 0
                 ? `আপনার অ্যাকাউন্ট তৈরি হয়েছে এবং রেফারেল স্বাগত বোনাস ৳${fmtAmount(inviteeRes.unlockedBonus)} যোগ হয়েছে।`
-                : 'আপনার অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে। টাস্ক, স্পিন ও চেক-ইন করে আয় শুরু করুন।',
+                : 'আপনার অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে। দৈনিক চেক-ইন, অ্যাকাউন্ট সেল ও রেফার করে আয় শুরু করুন।',
           });
         } else {
           if (claimed > 0) {
@@ -294,20 +285,8 @@ export default function App() {
             );
           }
         }
-        setHydrateError(null);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        let friendly = 'ডাটা লোড ব্যর্থ হয়েছে';
-        if (
-          msg.includes('client is offline') ||
-          msg.includes('unavailable') ||
-          msg.includes('network') ||
-          msg.includes('offline')
-        ) {
-          friendly = 'সার্ভারের সাথে সংযোগ সাময়িকভাবে বিচ্ছিন্ন। অনুগ্রহ করে ইন্টারনেট সংযোগ পরীক্ষা করে পুনরায় চেষ্টা করুন।';
-        }
-        setHydrateError(friendly);
-        showToast(friendly, 'err');
+        showToast(formatAppErrorMessage(err, 'ডাটা লোড ব্যর্থ হয়েছে'), 'err');
       } finally {
         setBusy(false);
       }
@@ -321,6 +300,10 @@ export default function App() {
       setFirebaseUser(user);
       setAuthResolved(true);
       if (user) {
+        if (wasSignedOutRef.current) {
+          wasSignedOutRef.current = false;
+          setPage('home');
+        }
         if (isAdminEmail(user.email) && !user.emailVerified) {
           setIsAdmin(false);
           setShowAdmin(false);
@@ -328,12 +311,12 @@ export default function App() {
         }
         void hydrateUserSession(user);
       } else {
+        wasSignedOutRef.current = true;
         autoOpenedAdminUidRef.current = null;
+        setPage('home');
         setAccount(null);
         setVault(null);
-        setHydrateError(null);
         setTransactions([]);
-        setSpins([]);
         setWithdrawals([]);
         setAccountSubmissions([]);
         setInviteeStatus(null);
@@ -366,22 +349,22 @@ export default function App() {
     const unsubSupport = subscribeUserSupportThread(firebaseUser.uid, (thread) => {
       setSupportThread(thread);
     });
-    const unsubRegularTasks = subscribeRegularTaskSettings((settings) => {
-      setRegularTaskSettings(settings);
-    });
     const unsubAccountSell = subscribeAccountSellSettings((settings) => {
       setAccountSellSettings(settings);
     });
     const unsubReferralSettings = subscribeReferralSettings((settings) => {
       setReferralSettings(settings);
     });
+    const unsubWithdrawalSettings = subscribeWithdrawalSettings((settings) => {
+      setWithdrawalSettings(settings);
+    });
 
     return () => {
       unsubAccount();
       unsubSupport();
-      unsubRegularTasks();
       unsubAccountSell();
       unsubReferralSettings();
+      unsubWithdrawalSettings();
     };
   }, [firebaseUser, showToast]);
 
@@ -395,20 +378,24 @@ export default function App() {
           }))
         : Promise.resolve(null);
 
-      const [inviteeRes, activity, sellCfg, regTaskCfg, refCfg, subs] = await Promise.all([
-        inviteePromise,
-        fetchUserActivity(firebaseUser.uid),
-        fetchAccountSellSettings(),
-        fetchRegularTaskSettings(),
-        fetchReferralSettings(),
-        fetchUserAccountSubmissions(firebaseUser.uid).catch(() => []),
-      ]);
+      const [freshAccount, inviteeRes, activity, sellCfg, refCfg, wdCfg, subs] =
+        await Promise.all([
+          fetchUserAccountSnapshot(firebaseUser.uid),
+          inviteePromise,
+          fetchUserActivity(firebaseUser.uid),
+          fetchAccountSellSettings(),
+          fetchReferralSettings(),
+          fetchWithdrawalSettings(),
+          fetchUserAccountSubmissions(firebaseUser.uid).catch(() => []),
+        ]);
+      if (freshAccount) {
+        setAccount(freshAccount);
+      }
       setTransactions(activity.transactions);
-      setSpins(activity.spins);
       setWithdrawals(activity.withdrawals);
       setAccountSellSettings(sellCfg);
-      setRegularTaskSettings(regTaskCfg);
       setReferralSettings(refCfg);
+      setWithdrawalSettings(wdCfg);
       if (inviteeRes) {
         setInviteeStatus(inviteeRes.status);
         if (inviteeRes.unlockedBonus > 0) {
@@ -438,9 +425,11 @@ export default function App() {
         };
         const cred = await createUserWithEmailAndPassword(auth, params.email, params.password);
         await updateProfile(cred.user, { displayName: params.name }).catch(() => {});
+        setPage('home');
         showToast('অ্যাকাউন্ট তৈরি হয়েছে! স্বাগতম টাকাডিয়ারে।', 'ok');
       } else {
         await signInWithEmailAndPassword(auth, params.email, params.password);
+        setPage('home');
         showToast('লগইন সফল হয়েছে', 'ok');
       }
     } catch (err) {
@@ -464,62 +453,18 @@ export default function App() {
     setBusy(true);
     try {
       const reward = await performDailyCheckin(firebaseUser.uid, currentAccount);
-      await refreshAccountAndActivity();
+      await refreshAccountAndActivity({ checkInviteeReferral: true });
       setRewardModal({
         title: 'দৈনিক চেক-ইন সফল!',
         body: `আপনি পেয়েছেন ৳${fmtAmount(reward)} বোনাস।`,
       });
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'চেক-ইন ব্যর্থ হয়েছে', 'err');
+      showToast(formatAppErrorMessage(err, 'চেক-ইন ব্যর্থ হয়েছে'), 'err');
     } finally {
       walletActionLockRef.current = false;
       setBusy(false);
     }
   }, [firebaseUser, refreshAccountAndActivity, showToast]);
-
-  const handleCompleteTask = useCallback(
-    async (task: TaskConfig) => {
-      const currentAccount = accountRef.current;
-      if (!firebaseUser || !currentAccount || walletActionLockRef.current) return;
-      walletActionLockRef.current = true;
-      setBusy(true);
-      try {
-        const awarded = await completeEarningTask(firebaseUser.uid, currentAccount, task);
-        await refreshAccountAndActivity({ checkInviteeReferral: true });
-        setRewardModal({
-          title: 'টাস্ক সম্পন্ন!',
-          body: `${task.title} সম্পন্ন করে আপনি পেয়েছেন ৳${fmtAmount(awarded)}।`,
-        });
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : 'টাস্ক সংরক্ষণ ব্যর্থ হয়েছে', 'err');
-      } finally {
-        walletActionLockRef.current = false;
-        setBusy(false);
-      }
-    },
-    [firebaseUser, refreshAccountAndActivity, showToast]
-  );
-
-  const handleSpinComplete = useCallback(
-    async (prizeIndex: number, amount: number) => {
-      const currentAccount = accountRef.current;
-      if (!firebaseUser || !currentAccount || walletActionLockRef.current) return;
-      walletActionLockRef.current = true;
-      try {
-        await recordSpinWin(firebaseUser.uid, currentAccount, prizeIndex, amount);
-        await refreshAccountAndActivity({ checkInviteeReferral: true });
-        setRewardModal({
-          title: amount >= 1.5 ? 'দারুণ পুরস্কার!' : 'স্পিন সম্পন্ন!',
-          body: `লাকি স্পিনে আপনি জিতেছেন ৳${fmtAmount(amount)}।`,
-        });
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : 'স্পিন পুরস্কার সংরক্ষণ ব্যর্থ', 'err');
-      } finally {
-        walletActionLockRef.current = false;
-      }
-    },
-    [firebaseUser, refreshAccountAndActivity, showToast]
-  );
 
   const handleSubmitWithdrawal = useCallback(
     async (method: PaymentMethod, accountNumber: string, amount: number) => {
@@ -547,6 +492,8 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    setShowAdmin(false);
+    setPage('home');
     await signOut(auth);
     showToast('সফলভাবে লগআউট সম্পন্ন হয়েছে');
   };
@@ -570,11 +517,11 @@ export default function App() {
 
   if (booting || !authResolved) {
     return (
-      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6">
         <img
           src="/logo.png"
-          alt="টাকাডিয়ার"
-          className="w-24 h-24 rounded-3xl object-cover shadow-2xl mb-5 border border-[var(--border)] bg-white/10"
+          alt="টাকাডিয়ার লোগো"
+          className="w-24 h-24 rounded-3xl object-cover shadow-xl border border-white/15 mb-5 select-none"
         />
         <h1 className="text-2xl font-bold">টাকাডিয়ার (TakaDear)</h1>
         <p className="text-xs text-[var(--muted)] mt-1">
@@ -627,46 +574,8 @@ export default function App() {
 
   if (!account) {
     return (
-      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6 text-center">
-        {hydrateError ? (
-          <div className="max-w-md w-full p-6 sm:p-7 rounded-3xl bg-[var(--surface)] border border-rose-500/30 shadow-2xl space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-rose-500/10 text-rose-400 flex items-center justify-center mx-auto text-2xl font-bold">
-              ⚠
-            </div>
-            <h2 className="text-lg font-bold text-[var(--text)]">সার্ভার সংযোগ সমস্যা</h2>
-            <p className="text-xs text-[var(--muted)] leading-relaxed">{hydrateError}</p>
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setHydrateError(null);
-                  if (firebaseUser) void hydrateUserSession(firebaseUser);
-                }}
-                className="flex-1 min-h-[44px] rounded-xl bg-[var(--primary)] text-white text-xs font-bold cursor-pointer hover:opacity-90 shadow-md transition-all active:scale-95"
-              >
-                পুনরায় চেষ্টা করুন
-              </button>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="min-h-[44px] px-5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] text-xs font-semibold cursor-pointer transition-colors"
-              >
-                লগআউট
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center space-y-4">
-            <img
-              src="/logo.png"
-              alt="টাকাডিয়ার"
-              className="w-16 h-16 rounded-2xl object-cover shadow-lg border border-[var(--border)] bg-white/10"
-            />
-            <p className="text-sm font-medium text-[var(--muted)] animate-pulse">
-              আপনার অ্যাকাউন্ট লোড হচ্ছে...
-            </p>
-          </div>
-        )}
+      <div className="min-h-screen w-full bg-[var(--bg)] text-[var(--text)] flex flex-col items-center justify-center p-6">
+        <p className="text-sm font-medium text-[var(--muted)]">আপনার অ্যাকাউন্ট লোড হচ্ছে...</p>
       </div>
     );
   }
@@ -792,12 +701,12 @@ export default function App() {
           <div className="flex items-center gap-3 mb-8 px-2">
             <img
               src="/logo.png"
-              alt="টাকাডিয়ার"
-              className="w-11 h-11 rounded-xl object-cover shadow-sm border border-[var(--border)] bg-white/10 shrink-0"
+              alt="টাকাডিয়ার লোগো"
+              className="w-10 h-10 rounded-xl object-cover border border-[var(--border)] shrink-0 select-none"
             />
             <div>
               <p className="text-base font-bold leading-tight">টাকাডিয়ার</p>
-              <p className="text-[11px] text-[var(--muted)]">TakaDear Platform</p>
+              <p className="text-[11px] text-[var(--muted)]">TakaDear Secure</p>
             </div>
           </div>
 
@@ -854,14 +763,11 @@ export default function App() {
           </nav>
         </div>
 
-        <div className="space-y-3">
-          <PWAInstallButton variant="sidebar" />
-          <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs space-y-1">
-            <p className="font-semibold text-[var(--text)] truncate">{account.name}</p>
-            <p className="text-[var(--muted)] font-mono-num">
-              লেভেল {toBn(level)} · AES-256-GCM
-            </p>
-          </div>
+        <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs space-y-1">
+          <p className="font-semibold text-[var(--text)] truncate">{account.name}</p>
+          <p className="text-[var(--muted)] font-mono-num">
+            লেভেল {toBn(level)} · AES-256-GCM
+          </p>
         </div>
       </aside>
 
@@ -869,11 +775,9 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 pb-20 lg:pb-8">
         <header className="sticky top-0 z-30 h-14 bg-[var(--surface)]/95 backdrop-blur-md border-b border-[var(--border)] px-4 sm:px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <img
-              src="/logo.png"
-              alt="টাকাডিয়ার"
-              className="w-9 h-9 rounded-xl object-cover shadow-sm border border-[var(--border)] bg-white/10 shrink-0 lg:hidden"
-            />
+            <div className="w-9 h-9 rounded-xl bg-[var(--primary)] text-white flex items-center justify-center font-bold text-sm shrink-0 lg:hidden">
+              {account.name.charAt(0)}
+            </div>
             <div className="min-w-0">
               <p className="text-sm font-bold truncate">{account.name}</p>
               <p className="text-[11px] text-[var(--muted)] truncate">
@@ -883,7 +787,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
-            <PWAInstallButton variant="header" />
             <button
               type="button"
               onClick={() => setPage('support')}
@@ -926,7 +829,6 @@ export default function App() {
               account={account}
               transactions={transactions}
               sellSettings={accountSellSettings}
-              regularTaskSettings={regularTaskSettings}
               busy={busy}
               onNavigate={setPage}
               onCheckin={handleCheckin}
@@ -960,19 +862,9 @@ export default function App() {
             <TasksView
               account={account}
               sellSettings={accountSellSettings}
-              regularTaskSettings={regularTaskSettings}
               referralSettings={referralSettings}
               submissions={accountSubmissions}
-              onCompleteTask={handleCompleteTask}
               onSubmitAccountSale={handleSubmitAccountSale}
-              onToast={showToast}
-            />
-          )}
-          {page === 'spin' && (
-            <SpinView
-              account={account}
-              spins={spins}
-              onSpinComplete={handleSpinComplete}
               onToast={showToast}
             />
           )}
@@ -980,6 +872,7 @@ export default function App() {
             <WalletView
               account={account}
               withdrawals={withdrawals}
+              withdrawalSettings={withdrawalSettings}
               onSubmitWithdrawal={handleSubmitWithdrawal}
               onToast={showToast}
             />
@@ -1045,7 +938,7 @@ export default function App() {
       {/* Mobile Bottom Navigation (within 15% sticky height cap) */}
       <nav
         aria-label="মোবাইল নেভিগেশন"
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[var(--surface)]/95 backdrop-blur-md border-t border-[var(--border)] grid grid-cols-5 items-center"
+        className="lg:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[var(--surface)]/95 backdrop-blur-md border-t border-[var(--border)] grid grid-cols-4 items-center"
       >
         {NAV_ITEMS.map(({ id, label, Icon }) => {
           const active =

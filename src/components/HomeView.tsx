@@ -1,27 +1,23 @@
 import React from 'react';
-import { Gift, Tv, Landmark, Users, Flame, Check, Mail, MessageCircle } from 'lucide-react';
+import { Gift, Landmark, Users, Flame, Check, Mail, MessageCircle } from 'lucide-react';
 import { FacebookLogo } from './FacebookLogo';
-import { PWAInstallButton } from './PWAInstallButton';
 import type { TransactionRecord, UserAccount } from '../services/firestoreService';
 import {
   DEFAULT_ACCOUNT_SELL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
   fmtAmount,
   fmtBnReward,
   getActiveStreakDisplay,
-  SPIN_LIMIT,
+  normalizeDailyCounters,
   STREAK_BONUS,
   toBn,
   todayKey,
   yesterdayKey,
   type AccountSellSettingsConfig,
-  type RegularTaskSettingsMap,
 } from '../utils/takadearLogic';
 
 export type NavPage =
   | 'home'
   | 'tasks'
-  | 'spin'
   | 'wallet'
   | 'profile'
   | 'gmail-task'
@@ -32,7 +28,6 @@ interface HomeViewProps {
   account: UserAccount;
   transactions: TransactionRecord[];
   sellSettings?: AccountSellSettingsConfig;
-  regularTaskSettings?: RegularTaskSettingsMap;
   busy: boolean;
   onNavigate: (page: NavPage) => void;
   onCheckin: () => Promise<void>;
@@ -42,7 +37,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   account,
   transactions,
   sellSettings = DEFAULT_ACCOUNT_SELL_SETTINGS,
-  regularTaskSettings = DEFAULT_REGULAR_TASK_SETTINGS,
   busy,
   onNavigate,
   onCheckin,
@@ -56,8 +50,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     yesterday
   );
   const checkedToday = streakDisplay.checkedToday;
-  const totalTasksDone = Object.values(account.dailyTasks || {}).reduce((acc, v) => acc + v, 0);
-  const spinsRemaining = Math.max(0, SPIN_LIMIT - (account.dailySpins || 0));
+  const normalized = normalizeDailyCounters(account, today);
 
   return (
     <div className="space-y-6">
@@ -149,13 +142,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </section>
       </div>
 
-      {/* PWA Install Banner (automatically hidden when already running as installed app) */}
-      <PWAInstallButton variant="banner" />
-
       {/* Quick Actions */}
       <section aria-label="দ্রুত কাজ">
         <h2 className="text-base font-bold mb-3">দ্রুত কাজ</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <button
             type="button"
             onClick={() => onNavigate('gmail-task')}
@@ -185,22 +175,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
             >
               {sellSettings.facebookEnabled ? `+৳${toBn(sellSettings.facebookPrice)}` : 'শীঘ্রই আসছে'}
             </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('spin')}
-            className="min-h-[90px] rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--primary)] p-3.5 flex flex-col items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <span className="text-2xl leading-none" aria-hidden="true">🎡</span>
-            <span className="text-xs font-semibold">লাকি স্পিন</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('tasks')}
-            className="min-h-[90px] rounded-2xl bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--primary)] p-3.5 flex flex-col items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Tv className="w-6 h-6 text-[var(--primary)]" />
-            <span className="text-xs font-semibold">বিজ্ঞাপন ও টাস্ক</span>
           </button>
           <button
             type="button"
@@ -249,27 +223,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <h2 className="text-base font-bold mb-3">আজকের পরিসংখ্যান</h2>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
-              <p className="text-xs text-[var(--muted)]">বিজ্ঞাপন দেখা</p>
-              <p className="text-xl font-bold font-mono-num mt-1 text-[var(--primary)]">
-                {regularTaskSettings.ad.enabled
-                  ? `${toBn(account.dailyAds)}/${toBn(regularTaskSettings.ad.limit)}`
-                  : 'শীঘ্রই আসছে'}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
-              <p className="text-xs text-[var(--muted)]">স্পিন বাকি</p>
-              <p className="text-xl font-bold font-mono-num mt-1 text-[var(--gold)]">
-                {toBn(spinsRemaining)}/{toBn(SPIN_LIMIT)}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
-              <p className="text-xs text-[var(--muted)]">সম্পন্ন টাস্ক</p>
-              <p className="text-xl font-bold font-mono-num mt-1">{toBn(totalTasksDone)}</p>
-            </div>
-            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
               <p className="text-xs text-[var(--muted)]">আজকের আয়</p>
               <p className="text-xl font-bold font-mono-num mt-1 text-[var(--emerald)]">
-                ৳{fmtAmount(account.dailyTodayEarn)}
+                ৳{fmtAmount(normalized.dailyTodayEarn)}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
+              <p className="text-xs text-[var(--muted)]">চেক-ইন স্ট্রিক</p>
+              <p className="text-xl font-bold font-mono-num mt-1 text-[var(--gold)]">
+                {toBn(streakDisplay.effectiveCount)} দিন
+              </p>
+            </div>
+            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
+              <p className="text-xs text-[var(--muted)]">মোট রেফারেল</p>
+              <p className="text-xl font-bold font-mono-num mt-1 text-[var(--primary)]">
+                {toBn(account.referrals)} জন
+              </p>
+            </div>
+            <div className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4">
+              <p className="text-xs text-[var(--muted)]">রেফারেল আয়</p>
+              <p className="text-xl font-bold font-mono-num mt-1">
+                ৳{fmtAmount(account.refEarned)}
               </p>
             </div>
           </div>

@@ -3,84 +3,29 @@ export const REFERRAL_BONUS = 2;
 export const FRIEND_REFERRAL_BONUS = 1;
 export const REFERRAL_MIN_TASKS = 1;
 export const MIN_WITHDRAW = 100;
-export const SPIN_LIMIT = 5;
-export const AD_LIMIT = 20;
 export const STREAK_BONUS = [0.05, 0.1, 0.3, 0.5, 0.7, 0.9, 1] as const;
 
 export const ADMIN_EMAILS = ['incomezone2729@gmail.com'] as const;
 
 export type PaymentMethod = 'bKash' | 'Nagad' | 'Rocket';
+export type WithdrawalFeeType = 'fixed' | 'percent';
 export type WithdrawalStatus = 'প্রসেসিং' | 'সম্পন্ন' | 'বাতিল';
 export type ThemeMode = 'dark' | 'light';
 
-export interface WheelSegment {
-  v: number;
-  c: string;
+export interface WithdrawalSettingsConfig {
+  feeType: WithdrawalFeeType;
+  feeValue: number;
 }
 
-export const WHEEL_SEGMENTS: readonly WheelSegment[] = [
-  { v: 0.1, c: '#6c5ce7' },
-  { v: 0.5, c: '#00d68f' },
-  { v: 0.2, c: '#f7b731' },
-  { v: 1, c: '#ff5c7a' },
-  { v: 0.1, c: '#6c5ce7' },
-  { v: 1.5, c: '#00d68f' },
-  { v: 0.5, c: '#f7b731' },
-  { v: 2, c: '#ff5c7a' },
-];
-
-export type ControllableTaskId = 'ad' | 'article' | 'quiz' | 'survey' | 'app';
-export type TaskId = ControllableTaskId | 'invite';
-
-export interface TaskConfig {
-  id: TaskId;
-  icon: string;
-  title: string;
-  desc: string;
-  reward: number;
-  limit: number;
-  timer: number;
-}
-
-export interface MergedTaskConfig extends TaskConfig {
-  enabled: boolean;
-  url: string;
-}
-
-export interface RegularTaskConfigItem {
-  enabled: boolean;
-  limit: number;
-  reward: number;
-  timer: number;
-  url: string;
-}
-
-export type RegularTaskSettingsMap = Record<ControllableTaskId, RegularTaskConfigItem>;
-
-export const CONTROLLABLE_TASK_IDS: readonly ControllableTaskId[] = [
-  'ad',
-  'article',
-  'quiz',
-  'survey',
-  'app',
-];
-
-export const DEFAULT_REGULAR_TASK_SETTINGS: RegularTaskSettingsMap = {
-  ad: { enabled: true, limit: AD_LIMIT, reward: 0.5, timer: 30, url: '' },
-  article: { enabled: true, limit: 5, reward: 0.5, timer: 15, url: '' },
-  quiz: { enabled: true, limit: 1, reward: 0.5, timer: 0, url: '' },
-  survey: { enabled: true, limit: 2, reward: 0.5, timer: 0, url: '' },
-  app: { enabled: true, limit: 3, reward: 0.5, timer: 20, url: '' },
+export const DEFAULT_WITHDRAWAL_SETTINGS: WithdrawalSettingsConfig = {
+  feeType: 'fixed',
+  feeValue: 0,
 };
 
-export const TASKS: readonly TaskConfig[] = [
-  { id: 'ad', icon: '📺', title: 'বিজ্ঞাপন দেখুন', desc: '৩০ সেকেন্ডের ভিডিও', reward: 0.5, limit: AD_LIMIT, timer: 30 },
-  { id: 'article', icon: '📖', title: 'আর্টিকেল পড়ুন', desc: '১৫ সেকেন্ড', reward: 0.5, limit: 5, timer: 15 },
-  { id: 'quiz', icon: '🧠', title: 'দৈনিক কুইজ', desc: 'সঠিক উত্তরে পুরস্কার', reward: 0.5, limit: 1, timer: 0 },
-  { id: 'survey', icon: '📋', title: 'সংক্ষিপ্ত সার্ভে', desc: '২টি প্রশ্ন', reward: 0.5, limit: 2, timer: 0 },
-  { id: 'app', icon: '📱', title: 'অ্যাপ ইনস্টল', desc: 'স্পনসর অ্যাপ', reward: 0.5, limit: 3, timer: 20 },
-  { id: 'invite', icon: '🤝', title: 'বন্ধু আমন্ত্রণ', desc: 'রেফার কোড ও শর্তাবলি', reward: REFERRAL_BONUS, limit: 99, timer: 0 },
-];
+export const WITHDRAWAL_FEE_PRESETS: Record<WithdrawalFeeType, readonly number[]> = {
+  fixed: [0, 5, 10, 15, 20, 30],
+  percent: [0, 1, 2, 5, 10],
+};
 
 export interface ReferralSettingsConfig {
   referrerBonus: number;
@@ -94,32 +39,8 @@ export const DEFAULT_REFERRAL_SETTINGS: ReferralSettingsConfig = {
   friendBonus: FRIEND_REFERRAL_BONUS,
   minTasks: REFERRAL_MIN_TASKS,
   conditionNote:
-    'বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফারেল কোড ব্যবহার করে ন্যূনতম কাজ সম্পন্ন করতে হবে।',
+    'বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফারেল কোড ব্যবহার করে ন্যূনতম দৈনিক চেক-ইন বা কাজ সম্পন্ন করতে হবে।',
 };
-
-export interface QuizQuestion {
-  q: string;
-  opts: readonly string[];
-  ans: number;
-}
-
-export const QUIZ_DATA: readonly QuizQuestion[] = [
-  { q: 'বাংলাদেশের রাজধানী?', opts: ['ঢাকা', 'চট্টগ্রাম', 'খুলনা', 'সিলেট'], ans: 0 },
-  { q: 'জাতীয় ফুল?', opts: ['গোলাপ', 'শাপলা', 'জবা', 'পদ্ম'], ans: 1 },
-  { q: 'এক বছরে কত মাস?', opts: ['১০', '১১', '১২', '১৩'], ans: 2 },
-  { q: 'মুদ্রার নাম?', opts: ['রুপি', 'টাকা', 'ডলার', 'রিয়াল'], ans: 1 },
-  { q: 'সূর্য কোন দিকে ওঠে?', opts: ['পশ্চিম', 'উত্তর', 'দক্ষিণ', 'পূর্ব'], ans: 3 },
-];
-
-export interface SurveyQuestion {
-  q: string;
-  opts: readonly string[];
-}
-
-export const SURVEY_DATA: readonly SurveyQuestion[] = [
-  { q: 'আপনার বয়স?', opts: ['১৮-২৪', '২৫-৩৪', '৩৫-৪৪', '৪৫+'] },
-  { q: 'দৈনিক ফোন ব্যবহার?', opts: ['১ ঘণ্টার কম', '১-৩ ঘণ্টা', '৩-৬ ঘণ্টা', '৬+ ঘণ্টা'] },
-];
 
 const BN_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 
@@ -184,6 +105,76 @@ export function computeNextWalletState(
     balance: fromPaisa(nextBalPaisa),
     totalEarned: fromPaisa(nextTotalPaisa),
   };
+}
+
+export function computeRewardCreditState(
+  currentBalance: number,
+  currentTotalEarned: number,
+  currentDailyTodayEarn: number,
+  reward: number
+): { balance: number; totalEarned: number; dailyTodayEarn: number } {
+  const safeReward = roundMoney(reward);
+  if (!Number.isFinite(safeReward) || safeReward <= 0) {
+    throw new Error('অবৈধ পুরস্কারের পরিমাণ');
+  }
+  const safeBalance = Number(currentBalance ?? 0);
+  const safeTotal = Number(currentTotalEarned ?? 0);
+  const safeDaily = Number(currentDailyTodayEarn ?? 0);
+  if (!Number.isFinite(safeBalance) || !Number.isFinite(safeTotal) || !Number.isFinite(safeDaily)) {
+    throw new Error('অবৈধ ওয়ালেট সংখ্যা');
+  }
+
+  // Keep exact 2-decimal paisa arithmetic for normal balances, and preserve exact delta
+  // if a legacy stored value contains >2 decimal places so Firestore rule delta checks match.
+  const addPreservingLegacyPrecision = (base: number): number => {
+    const roundedBase = roundMoney(base);
+    if (Math.abs(base - roundedBase) < 0.0005) {
+      return addMoney(roundedBase, safeReward);
+    }
+    return Number((base + safeReward).toFixed(4));
+  };
+
+  return {
+    balance: addPreservingLegacyPrecision(safeBalance),
+    totalEarned: addPreservingLegacyPrecision(safeTotal),
+    dailyTodayEarn: addPreservingLegacyPrecision(safeDaily),
+  };
+}
+
+export function formatAppErrorMessage(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { error?: unknown };
+      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        const inner = parsed.error.toLowerCase();
+        if (inner.includes('permission') || inner.includes('insufficient')) {
+          return 'অনুমতি বা তথ্য যাচাই ব্যর্থ হয়েছে, দয়া করে পুনরায় চেষ্টা করুন';
+        }
+        if (inner.includes('offline') || inner.includes('network') || inner.includes('unavailable')) {
+          return 'ইন্টারনেট সংযোগে সমস্যা হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন';
+        }
+        return fallback;
+      }
+    } catch {
+      // Ignore malformed JSON
+    }
+  }
+
+  const lower = trimmed.toLowerCase();
+  if (lower.includes('token expired') || lower.includes('authorization') || lower.includes('firebase token')) {
+    return 'সেশন মেয়াদোত্তীর্ণ হয়েছে, দয়া করে আবার চেষ্টা করুন';
+  }
+  if (lower.includes('permission') || lower.includes('insufficient')) {
+    return 'অনুমতি বা তথ্য যাচাই ব্যর্থ হয়েছে, দয়া করে পুনরায় চেষ্টা করুন';
+  }
+  if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('offline')) {
+    return 'ইন্টারনেট বা সার্ভার সংযোগ ব্যর্থ হয়েছে, আবার চেষ্টা করুন';
+  }
+  return trimmed;
 }
 
 export function todayKey(date: Date = new Date()): string {
@@ -283,24 +274,70 @@ export function validateBangladeshMobile(phone: string): boolean {
   return /^01[3-9]\d{8}$/.test(phone.trim());
 }
 
+export function calculateWithdrawalFee(
+  amount: number,
+  settings?: WithdrawalSettingsConfig | null
+): number {
+  const cleanAmount = roundMoney(amount);
+  if (!Number.isFinite(amount) || cleanAmount <= 0 || !settings) return 0;
+  const rawFee = Number(settings.feeValue ?? 0);
+  if (!Number.isFinite(rawFee) || rawFee <= 0) return 0;
+  if (settings.feeType === 'percent') {
+    return roundMoney((cleanAmount * rawFee) / 100);
+  }
+  return roundMoney(rawFee);
+}
+
+export function calculateWithdrawalTotal(
+  amount: number,
+  settings?: WithdrawalSettingsConfig | null
+): { payoutAmount: number; fee: number; totalDeducted: number } {
+  const payoutAmount = roundMoney(amount);
+  const fee = calculateWithdrawalFee(payoutAmount, settings);
+  const totalDeducted = addMoney(payoutAmount, fee);
+  return { payoutAmount, fee, totalDeducted };
+}
+
+export function validateWithdrawalSettings(settings: WithdrawalSettingsConfig): string | null {
+  if (settings.feeType !== 'fixed' && settings.feeType !== 'percent') {
+    return 'ফি এর ধরন সঠিক নয়';
+  }
+  const val = Number(settings.feeValue);
+  if (!Number.isFinite(val) || val < 0) {
+    return 'উইথড্র ফি শূন্য বা তার বেশি হতে হবে';
+  }
+  if (settings.feeType === 'fixed' && val > 1000) {
+    return 'নির্দিষ্ট উইথড্র ফি সর্বোচ্চ ৳১,০০০ হতে পারে';
+  }
+  if (settings.feeType === 'percent' && val > 50) {
+    return 'শতাংশ উইথড্র ফি সর্বোচ্চ ৫০% হতে পারে';
+  }
+  return null;
+}
+
 export function validateWithdrawal(
   phone: string,
   amount: number,
-  currentBalance: number
+  currentBalance: number,
+  fee = 0
 ): string | null {
   if (!validateBangladeshMobile(phone)) {
-    return 'সঠিক ১১ সংখ্যার মোবাইল নম্বর দিন (01XXXXXXXXX)';
+    return 'সঠিক ১১ সংখ্যার বিকাশ নম্বর দিন (01XXXXXXXXX)';
   }
   const cleanAmount = roundMoney(amount);
+  const cleanFee = Math.max(0, roundMoney(fee));
+  const totalDeducted = addMoney(cleanAmount, cleanFee);
   const cleanBalance = roundMoney(currentBalance);
   if (!Number.isFinite(amount) || cleanAmount < MIN_WITHDRAW) {
     return `সর্বনিম্ন উত্তোলন ৳${MIN_WITHDRAW}`;
   }
-  if (cleanAmount > 100000) {
+  if (cleanAmount > 100000 || totalDeducted > 150000) {
     return 'একবারে সর্বোচ্চ ৳১০০,০০০ উত্তোলন করা যাবে';
   }
-  if (cleanAmount > cleanBalance) {
-    return 'আপনার পর্যাপ্ত ব্যালেন্স নেই';
+  if (totalDeducted > cleanBalance) {
+    return cleanFee > 0
+      ? `আপনার পর্যাপ্ত ব্যালেন্স নেই (ফিসহ মোট ৳${fmtAmount(totalDeducted)} প্রয়োজন)`
+      : 'আপনার পর্যাপ্ত ব্যালেন্স নেই';
   }
   return null;
 }
@@ -367,15 +404,6 @@ export function getActiveStreakDisplay(
     completedInCycle: 0,
     nextIndex: 0,
   };
-}
-
-export function computeSpinRotation(currentRotation: number, segmentIndex: number): number {
-  const segAngle = 360 / WHEEL_SEGMENTS.length;
-  const targetAngle = (360 - (segmentIndex * segAngle + segAngle / 2)) % 360;
-  const curMod = ((currentRotation % 360) + 360) % 360;
-  let delta = targetAngle - curMod;
-  if (delta < 0) delta += 360;
-  return currentRotation + 360 * 6 + delta;
 }
 
 export function normalizeDailyCounters<T extends {
@@ -566,88 +594,6 @@ export function filterUsersByStatusAndQuery<
   });
 }
 
-export function validateTaskUrl(url: string): string | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  if (trimmed.length > 500) return 'লিংক সর্বোচ্চ ৫০০ অক্ষরের হতে পারে';
-  if (/\s/.test(trimmed)) return 'লিংকের ভেতর কোনো স্পেস থাকতে পারবে না';
-  if (!/^https?:\/\/[^\s]+$/i.test(trimmed)) {
-    return 'সঠিক লিংক দিন (http:// বা https:// দিয়ে শুরু)';
-  }
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return 'শুধুমাত্র http:// বা https:// লিংক অনুমোদিত';
-    }
-  } catch {
-    return 'সঠিক ও বৈধ URL লিংক দিন';
-  }
-  return null;
-}
-
-export function validateRegularTaskSettings(settings: RegularTaskSettingsMap): string | null {
-  for (const id of CONTROLLABLE_TASK_IDS) {
-    const item = settings[id];
-    const meta = TASKS.find((t) => t.id === id);
-    const label = meta?.title || id;
-
-    if (!item || typeof item.enabled !== 'boolean') {
-      return `${label}: চালু/বন্ধ অবস্থা সঠিক নয়`;
-    }
-    if (!Number.isInteger(item.limit) || item.limit < 0 || item.limit > 200) {
-      return `${label}: দৈনিক লিমিট ০ থেকে ২০০ এর মধ্যে পূর্ণসংখ্যা হতে হবে`;
-    }
-    if (!Number.isFinite(item.reward) || item.reward < 0.05 || item.reward > 500) {
-      return `${label}: পুরস্কারের পরিমাণ ০.০৫৳ থেকে ৫০০৳ এর মধ্যে হতে হবে`;
-    }
-    if (!Number.isInteger(item.timer) || item.timer < 0 || item.timer > 300) {
-      return `${label}: সময় ০ থেকে ৩০০ সেকেন্ডের মধ্যে পূর্ণসংখ্যা হতে হবে`;
-    }
-    const urlErr = validateTaskUrl(item.url);
-    if (urlErr) {
-      return `${label}: ${urlErr}`;
-    }
-  }
-  return null;
-}
-
-export function buildMergedTasks(
-  settings: RegularTaskSettingsMap,
-  referralSettings?: ReferralSettingsConfig
-): MergedTaskConfig[] {
-  return TASKS.map((base) => {
-    if (base.id === 'invite') {
-      return {
-        ...base,
-        reward: roundMoney(referralSettings?.referrerBonus ?? REFERRAL_BONUS),
-        enabled: true,
-        url: '',
-      };
-    }
-    const override = settings[base.id] || DEFAULT_REGULAR_TASK_SETTINGS[base.id];
-    const timer = Number.isInteger(override.timer) && override.timer >= 0 ? override.timer : base.timer;
-    const url = (override.url || '').trim();
-    const reward = roundMoney(override.reward);
-    const limit = Math.max(0, Math.min(200, Math.round(override.limit)));
-    let desc = base.desc;
-    if (url) {
-      desc = timer > 0 ? `লিংক ভিজিট · ${toBn(timer)} সেকেন্ড` : 'লিংক ভিজিট করে আয়';
-    } else if (timer > 0 && (base.id === 'ad' || base.id === 'article' || base.id === 'app')) {
-      desc = `${toBn(timer)} সেকেন্ডের টাস্ক`;
-    }
-
-    return {
-      ...base,
-      desc,
-      reward: reward >= 0.05 ? reward : base.reward,
-      limit,
-      timer,
-      enabled: Boolean(override.enabled),
-      url,
-    };
-  });
-}
-
 export function validateReferralSettings(settings: ReferralSettingsConfig): string | null {
   if (!Number.isFinite(settings.referrerBonus) || settings.referrerBonus < 0.5 || settings.referrerBonus > 100) {
     return 'আমন্ত্রণকারী বোনাস ০.৫০৳ থেকে ১০০৳ এর মধ্যে হতে হবে';
@@ -656,7 +602,7 @@ export function validateReferralSettings(settings: ReferralSettingsConfig): stri
     return 'বন্ধু বোনাস ০৳ থেকে ১০০৳ এর মধ্যে হতে হবে';
   }
   if (!Number.isInteger(settings.minTasks) || settings.minTasks < 0 || settings.minTasks > 10) {
-    return 'ন্যূনতম টাস্কের শর্ত ০ থেকে ১০ এর মধ্যে পূর্ণসংখ্যা হতে হবে';
+    return 'ন্যূনতম শর্ত ০ থেকে ১০ এর মধ্যে পূর্ণসংখ্যা হতে হবে';
   }
   if ((settings.conditionNote || '').trim().length > 300) {
     return 'শর্তের বিবরণ সর্বোচ্চ ৩০০ অক্ষরের হতে পারে';
@@ -665,15 +611,17 @@ export function validateReferralSettings(settings: ReferralSettingsConfig): stri
 }
 
 export function countCompletedActivities(account: {
+  streakCount?: number;
   dailySpins?: number;
   dailyTasks?: Record<string, number>;
 }): number {
+  const streak = Math.max(0, Number(account.streakCount || 0));
   const spins = Math.max(0, Number(account.dailySpins || 0));
   const tasksTotal = Object.values(account.dailyTasks || {}).reduce(
     (sum, val) => sum + Math.max(0, Number(val) || 0),
     0
   );
-  return spins + tasksTotal;
+  return streak + spins + tasksTotal;
 }
 
 export function isReferralQualified(completedCount: number, minTasks: number): boolean {
@@ -681,14 +629,187 @@ export function isReferralQualified(completedCount: number, minTasks: number): b
   return completedCount >= minTasks;
 }
 
-export function calculateRemainingSeconds(
-  startedAtMs: number,
-  durationSeconds: number,
-  nowMs: number = Date.now()
-): number {
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
-  const elapsedMs = Math.max(0, nowMs - startedAtMs);
-  const remainingMs = durationSeconds * 1000 - elapsedMs;
-  if (remainingMs <= 0) return 0;
-  return Math.ceil(remainingMs / 1000);
+export const USER_ACCOUNT_REQUIRED_KEYS = [
+  'uid',
+  'name',
+  'refCode',
+  'balance',
+  'totalEarned',
+  'referrals',
+  'refEarned',
+  'streakCount',
+  'dailyDate',
+  'dailySpins',
+  'dailyAds',
+  'dailyTodayEarn',
+  'dailyTasks',
+  'theme',
+  'role',
+  'createdAt',
+  'updatedAt',
+] as const;
+
+export const USER_ACCOUNT_ALLOWED_KEYS = [
+  ...USER_ACCOUNT_REQUIRED_KEYS,
+  'referredBy',
+  'streakLast',
+  'suspended',
+  'suspensionReason',
+  'suspendedAt',
+  'lastSpinAt',
+  'lastBigSpinAt',
+] as const;
+
+export interface LegacyUserRepairPlan {
+  needsRepair: boolean;
+  keysToDelete: string[];
+  patch: Record<string, unknown>;
+  needsCreatedAt: boolean;
 }
+
+function isTimestampLike(value: unknown): boolean {
+  return (
+    value !== undefined &&
+    value !== null &&
+    typeof value === 'object' &&
+    ('seconds' in (value as Record<string, unknown>) ||
+      'toMillis' in (value as Record<string, unknown>))
+  );
+}
+
+export function analyzeLegacyUserAccount(
+  raw: Record<string, unknown>,
+  uid: string,
+  email: string,
+  today: string,
+  fallbackDisplayName?: string
+): LegacyUserRepairPlan {
+  const allowedSet = new Set<string>(USER_ACCOUNT_ALLOWED_KEYS);
+  const keysToDelete = Object.keys(raw).filter((k) => !allowedSet.has(k));
+  const patch: Record<string, unknown> = {};
+
+  if (typeof raw.uid !== 'string' || raw.uid !== uid) {
+    patch.uid = uid;
+  }
+  if (typeof raw.name !== 'string' || raw.name.trim().length < 1 || raw.name.length > 80) {
+    patch.name = deriveDisplayName(email, fallbackDisplayName);
+  }
+  if (
+    typeof raw.refCode !== 'string' ||
+    raw.refCode.length < 4 ||
+    raw.refCode.length > 24 ||
+    !/^[A-Z0-9_\-]+$/.test(raw.refCode)
+  ) {
+    patch.refCode = generateRefCode(email, uid);
+  }
+  if (
+    'referredBy' in raw &&
+    raw.referredBy !== null &&
+    (typeof raw.referredBy !== 'string' || raw.referredBy.length > 24)
+  ) {
+    patch.referredBy = null;
+  }
+  if (typeof raw.balance !== 'number' || !Number.isFinite(raw.balance) || raw.balance < 0 || raw.balance > 10000000) {
+    patch.balance = 0;
+  }
+  if (
+    typeof raw.totalEarned !== 'number' ||
+    !Number.isFinite(raw.totalEarned) ||
+    raw.totalEarned < 0 ||
+    raw.totalEarned > 10000000
+  ) {
+    patch.totalEarned = 0;
+  }
+  if (!Number.isInteger(raw.referrals) || Number(raw.referrals) < 0 || Number(raw.referrals) > 100000) {
+    patch.referrals = 0;
+  }
+  if (
+    typeof raw.refEarned !== 'number' ||
+    !Number.isFinite(raw.refEarned) ||
+    raw.refEarned < 0 ||
+    raw.refEarned > 10000000
+  ) {
+    patch.refEarned = 0;
+  }
+  if (!Number.isInteger(raw.streakCount) || Number(raw.streakCount) < 0 || Number(raw.streakCount) > 10000) {
+    patch.streakCount = 0;
+  }
+  if (
+    'streakLast' in raw &&
+    raw.streakLast !== null &&
+    (typeof raw.streakLast !== 'string' || raw.streakLast.length > 16)
+  ) {
+    patch.streakLast = null;
+  }
+
+  const validDailyDate =
+    typeof raw.dailyDate === 'string' && raw.dailyDate.length >= 8 && raw.dailyDate.length <= 16;
+  if (!validDailyDate) {
+    patch.dailyDate = today;
+  }
+  if (!Number.isInteger(raw.dailySpins) || Number(raw.dailySpins) < 0 || Number(raw.dailySpins) > 20) {
+    patch.dailySpins = 0;
+  }
+  if (!Number.isInteger(raw.dailyAds) || Number(raw.dailyAds) < 0 || Number(raw.dailyAds) > 200) {
+    patch.dailyAds = 0;
+  }
+  if (
+    typeof raw.dailyTodayEarn !== 'number' ||
+    !Number.isFinite(raw.dailyTodayEarn) ||
+    raw.dailyTodayEarn < 0 ||
+    raw.dailyTodayEarn > 100000
+  ) {
+    patch.dailyTodayEarn = 0;
+  }
+  if (
+    !raw.dailyTasks ||
+    typeof raw.dailyTasks !== 'object' ||
+    Array.isArray(raw.dailyTasks) ||
+    Object.keys(raw.dailyTasks as Record<string, unknown>).length > 20
+  ) {
+    patch.dailyTasks = {};
+  }
+  if (raw.theme !== 'dark' && raw.theme !== 'light') {
+    patch.theme = 'dark';
+  }
+  if (raw.role !== 'user' && raw.role !== 'admin') {
+    patch.role = 'user';
+  } else if (raw.role === 'admin' && !isAdminEmail(email)) {
+    patch.role = 'user';
+  }
+  if ('suspended' in raw && typeof raw.suspended !== 'boolean') {
+    patch.suspended = false;
+  }
+  if (
+    'suspensionReason' in raw &&
+    raw.suspensionReason !== null &&
+    (typeof raw.suspensionReason !== 'string' || raw.suspensionReason.length > 240)
+  ) {
+    patch.suspensionReason = null;
+  }
+  if ('suspendedAt' in raw && raw.suspendedAt !== null && !isTimestampLike(raw.suspendedAt)) {
+    patch.suspendedAt = null;
+  }
+  if ('lastSpinAt' in raw && raw.lastSpinAt !== null && !isTimestampLike(raw.lastSpinAt)) {
+    patch.lastSpinAt = null;
+  }
+  if ('lastBigSpinAt' in raw && raw.lastBigSpinAt !== null && !isTimestampLike(raw.lastBigSpinAt)) {
+    patch.lastBigSpinAt = null;
+  }
+
+  const needsCreatedAt = !isTimestampLike(raw.createdAt);
+  const needsUpdatedAt = !isTimestampLike(raw.updatedAt);
+  const needsRepair =
+    keysToDelete.length > 0 ||
+    Object.keys(patch).length > 0 ||
+    needsCreatedAt ||
+    needsUpdatedAt;
+
+  return {
+    needsRepair,
+    keysToDelete,
+    patch,
+    needsCreatedAt,
+  };
+}
+

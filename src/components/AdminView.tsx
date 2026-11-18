@@ -23,7 +23,7 @@ import {
   adminReviewAccountSubmission,
   adminSaveAccountSellSettings,
   adminSaveReferralSettings,
-  adminSaveRegularTaskSettings,
+  adminSaveWithdrawalSettings,
   adminSetUserSuspension,
   adminUpdateWithdrawalStatus,
   fetchAdminDashboardData,
@@ -38,30 +38,30 @@ import {
 } from '../services/firestoreService';
 import { fetchAdminSecurityStatus, type AdminSecurityStatus } from '../services/secureApi';
 import {
-  CONTROLLABLE_TASK_IDS,
+  calculateWithdrawalTotal,
   DEFAULT_ACCOUNT_SELL_SETTINGS,
   DEFAULT_REFERRAL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
+  DEFAULT_WITHDRAWAL_SETTINGS,
   filterAccountSubmissionsByStatus,
   filterAdminTransactions,
   filterUsersByStatusAndQuery,
   filterWithdrawalsByStatus,
   fmtAmount,
   fmtBnReward,
-  TASKS,
   toBn,
   validateAdminBalanceDelta,
   validateReferralSettings,
-  validateRegularTaskSettings,
   validateTaskSellSettings,
+  validateWithdrawalSettings,
+  WITHDRAWAL_FEE_PRESETS,
   type AccountSellSettingsConfig,
   type AccountSubmissionStatus,
-  type ControllableTaskId,
   type ReferralSettingsConfig,
-  type RegularTaskSettingsMap,
+  type WithdrawalSettingsConfig,
   type WithdrawalStatus,
 } from '../utils/takadearLogic';
 import { Modal } from './Modal';
+import { BkashLogo } from './BkashLogo';
 import { FacebookLogo } from './FacebookLogo';
 import { LiveSupportChat } from './LiveSupportChat';
 
@@ -98,15 +98,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [sellForm, setSellForm] = useState<AccountSellSettingsConfig>({
     ...DEFAULT_ACCOUNT_SELL_SETTINGS,
   });
-  const [regularTaskForm, setRegularTaskForm] = useState<RegularTaskSettingsMap>({
-    ad: { ...DEFAULT_REGULAR_TASK_SETTINGS.ad },
-    article: { ...DEFAULT_REGULAR_TASK_SETTINGS.article },
-    quiz: { ...DEFAULT_REGULAR_TASK_SETTINGS.quiz },
-    survey: { ...DEFAULT_REGULAR_TASK_SETTINGS.survey },
-    app: { ...DEFAULT_REGULAR_TASK_SETTINGS.app },
-  });
   const [referralForm, setReferralForm] = useState<ReferralSettingsConfig>({
     ...DEFAULT_REFERRAL_SETTINGS,
+  });
+  const [withdrawalFeeForm, setWithdrawalFeeForm] = useState<WithdrawalSettingsConfig>({
+    ...DEFAULT_WITHDRAWAL_SETTINGS,
   });
   const [decryptedSubs, setDecryptedSubs] = useState<
     Record<string, { identifier: string; password: string; note?: string }>
@@ -139,8 +135,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
       ]);
       setData(dashboardRes);
       setSellForm(dashboardRes.accountSellSettings);
-      setRegularTaskForm(dashboardRes.regularTaskSettings);
       setReferralForm(dashboardRes.referralSettings);
+      setWithdrawalFeeForm(dashboardRes.withdrawalSettings);
       if (secRes) setSecurityStatus(secRes);
     } catch (err) {
       onToast(err instanceof Error ? err.message : 'অ্যাডমিন ডেটা লোড ব্যর্থ', 'err');
@@ -267,39 +263,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const updateRegularTaskField = <K extends keyof RegularTaskSettingsMap['ad']>(
-    taskId: ControllableTaskId,
-    field: K,
-    value: RegularTaskSettingsMap['ad'][K]
-  ) => {
-    setRegularTaskForm((prev) => ({
-      ...prev,
-      [taskId]: {
-        ...prev[taskId],
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleSaveRegularTaskSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const err = validateRegularTaskSettings(regularTaskForm);
-    if (err) {
-      onToast(err, 'err');
-      return;
-    }
-    setBusyAction(true);
-    try {
-      await adminSaveRegularTaskSettings(regularTaskForm);
-      onToast('দৈনিক টাস্কসমূহের সেটিংস সেভ ও আপডেট হয়েছে', 'ok');
-      await load();
-    } catch (saveErr) {
-      onToast(saveErr instanceof Error ? saveErr.message : 'টাস্ক সেটিংস সেভ করা যায়নি', 'err');
-    } finally {
-      setBusyAction(false);
-    }
-  };
-
   const handleSaveReferralSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     const err = validateReferralSettings(referralForm);
@@ -314,6 +277,25 @@ export const AdminView: React.FC<AdminViewProps> = ({
       await load();
     } catch (saveErr) {
       onToast(saveErr instanceof Error ? saveErr.message : 'রেফারেল সেটিংস সেভ করা যায়নি', 'err');
+    } finally {
+      setBusyAction(false);
+    }
+  };
+
+  const handleSaveWithdrawalSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const err = validateWithdrawalSettings(withdrawalFeeForm);
+    if (err) {
+      onToast(err, 'err');
+      return;
+    }
+    setBusyAction(true);
+    try {
+      await adminSaveWithdrawalSettings(withdrawalFeeForm);
+      onToast('বিকাশ উইথড্র ফি সেটিংস সেভ হয়েছে', 'ok');
+      await load();
+    } catch (saveErr) {
+      onToast(saveErr instanceof Error ? saveErr.message : 'উইথড্র ফি সেভ করা যায়নি', 'err');
     } finally {
       setBusyAction(false);
     }
@@ -485,7 +467,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           {(
             [
               ['overview', 'ওভারভিউ'],
-              ['tasks', 'দৈনিক টাস্ক কন্ট্রোল'],
+              ['tasks', 'রেফারেল কন্ট্রোল'],
               ['submissions', `অ্যাকাউন্ট সেল (${toBn(pendingSubmissions.length)})`],
               ['users', `ব্যবহারকারী (${toBn(users.length)})`],
               [
@@ -612,18 +594,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div className="divide-y divide-[var(--border)]">
                   {pendingWithdrawals.slice(0, 5).map((w) => {
                     const decrypted = decryptedNumbers[w.id];
+                    const wdFee = Number(w.fee || 0);
+                    const wdTotal = Number(w.totalAmount ?? w.amount + wdFee);
                     return (
                       <div key={w.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold">
-                            {w.userName} · {w.method} ·{' '}
-                            <span className="font-mono-num text-[var(--primary)]">
-                              {decrypted || w.maskedNumber}
-                            </span>
-                          </p>
-                          <p className="text-xs text-[var(--muted)] font-mono-num">
-                            ৳{fmtAmount(w.amount)} · {w.dateLabel}
-                          </p>
+                        <div className="flex items-center gap-3 min-w-0">
+                          {w.method === 'bKash' && <BkashLogo className="w-7 h-7 shrink-0" />}
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold">
+                              {w.userName} · {w.method} ·{' '}
+                              <span className="font-mono-num text-[var(--primary)]">
+                                {decrypted || w.maskedNumber}
+                              </span>
+                            </p>
+                            <p className="text-xs text-[var(--muted)] font-mono-num">
+                              ৳{fmtAmount(w.amount)}
+                              {wdFee > 0 ? ` (+ফি ৳${fmtAmount(wdFee)} = মোট ৳${fmtAmount(wdTotal)})` : ''} · {w.dateLabel}
+                            </p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0 flex-wrap">
                           {!decrypted && (
@@ -1046,163 +1034,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         {tab === 'tasks' && data && (
           <div className="space-y-6">
-            <form
-              onSubmit={handleSaveRegularTaskSettings}
-              className="rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-5"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-bold">দৈনিক আর্নিং টাস্ক কন্ট্রোল</h2>
-                  <p className="text-xs text-[var(--muted)] mt-0.5">
-                    বিজ্ঞাপন দেখুন, আর্টিকেল পড়ুন, দৈনিক কুইজ, সংক্ষিপ্ত সার্ভে ও অ্যাপ ইনস্টল অন/অফ করুন এবং লিংক, লিমিট, সময় ও পুরস্কার সেট করুন
-                  </p>
-                </div>
-                <button
-                  type="submit"
-                  disabled={busyAction}
-                  className="min-h-[42px] px-4 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>সব পরিবর্তন সেভ করুন</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {CONTROLLABLE_TASK_IDS.map((taskId) => {
-                  const meta = TASKS.find((t) => t.id === taskId);
-                  const cfg = regularTaskForm[taskId];
-                  return (
-                    <div
-                      key={taskId}
-                      className={`p-4 sm:p-5 rounded-2xl border space-y-3.5 transition-colors ${
-                        cfg.enabled
-                          ? 'bg-[var(--surface-2)] border-[var(--border)]'
-                          : 'bg-[var(--surface-2)]/60 border-amber-500/30'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-2xl shrink-0">{meta?.icon}</span>
-                          <div className="min-w-0">
-                            <h3 className="text-sm font-bold truncate">{meta?.title}</h3>
-                            <p className="text-[11px] text-[var(--muted)]">
-                              {cfg.enabled
-                                ? 'ইউজারের প্যানেলে চালু আছে'
-                                : 'বন্ধ — ইউজাররা "শীঘ্রই আসছে" দেখবে (অ্যামাউন্ট দেখাবে না)'}
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => updateRegularTaskField(taskId, 'enabled', !cfg.enabled)}
-                          aria-pressed={cfg.enabled}
-                          className={`min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors shrink-0 ${
-                            cfg.enabled
-                              ? 'bg-emerald-500/15 text-[var(--emerald)] border border-emerald-500/30'
-                              : 'bg-amber-500/15 text-[var(--gold)] border border-amber-500/30'
-                          }`}
-                        >
-                          {cfg.enabled ? 'চালু (ON)' : 'বন্ধ (OFF)'}
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-2.5">
-                        <div>
-                          <label
-                            htmlFor={`task-limit-${taskId}`}
-                            className="block text-[11px] text-[var(--muted)] mb-1"
-                          >
-                            দৈনিক লিমিট
-                          </label>
-                          <input
-                            id={`task-limit-${taskId}`}
-                            type="number"
-                            min="0"
-                            max="200"
-                            step="1"
-                            value={cfg.limit}
-                            onChange={(e) =>
-                              updateRegularTaskField(
-                                taskId,
-                                'limit',
-                                Math.max(0, Math.round(Number(e.target.value) || 0))
-                              )
-                            }
-                            className="w-full min-h-[40px] px-2.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm font-mono-num"
-                          />
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor={`task-reward-${taskId}`}
-                            className="block text-[11px] text-[var(--muted)] mb-1"
-                          >
-                            পুরস্কার (৳)
-                          </label>
-                          <input
-                            id={`task-reward-${taskId}`}
-                            type="number"
-                            min="0.05"
-                            max="500"
-                            step="0.05"
-                            value={cfg.reward}
-                            onChange={(e) =>
-                              updateRegularTaskField(taskId, 'reward', Number(e.target.value))
-                            }
-                            className="w-full min-h-[40px] px-2.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm font-mono-num"
-                          />
-                        </div>
-
-                        <div>
-                          <label
-                            htmlFor={`task-timer-${taskId}`}
-                            className="block text-[11px] text-[var(--muted)] mb-1"
-                          >
-                            সময় (সেকেন্ড)
-                          </label>
-                          <input
-                            id={`task-timer-${taskId}`}
-                            type="number"
-                            min="0"
-                            max="300"
-                            step="1"
-                            value={cfg.timer}
-                            onChange={(e) =>
-                              updateRegularTaskField(
-                                taskId,
-                                'timer',
-                                Math.max(0, Math.round(Number(e.target.value) || 0))
-                              )
-                            }
-                            className="w-full min-h-[40px] px-2.5 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm font-mono-num"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label
-                          htmlFor={`task-url-${taskId}`}
-                          className="block text-[11px] text-[var(--muted)] mb-1"
-                        >
-                          টাস্ক লিংক (URL) — শুরু করুনে ক্লিক করলে এই লিংকে নিয়ে যাবে
-                        </label>
-                        <input
-                          id={`task-url-${taskId}`}
-                          type="url"
-                          maxLength={500}
-                          value={cfg.url}
-                          onChange={(e) => updateRegularTaskField(taskId, 'url', e.target.value)}
-                          placeholder="https://example.com/... (ফাঁকা রাখলে বিল্ট-ইন ফ্লো চলবে)"
-                          className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs font-mono-num"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </form>
-
             {/* Referral Bonus & Conditions Form */}
             <form
               onSubmit={handleSaveReferralSettings}
@@ -1270,7 +1101,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                 <div>
                   <label htmlFor="ref-min-tasks" className="block text-xs text-[var(--muted)] mb-1">
-                    বন্ধুর ন্যূনতম টাস্ক/স্পিন শর্ত (০-১০)
+                    বন্ধুর ন্যূনতম চেক-ইন/কাজ শর্ত (০-১০)
                   </label>
                   <input
                     id="ref-min-tasks"
@@ -1302,7 +1133,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   onChange={(e) =>
                     setReferralForm((prev) => ({ ...prev, conditionNote: e.target.value }))
                   }
-                  placeholder="যেমন: বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফারেল কোড ব্যবহার করে ন্যূনতম ১টি টাস্ক সম্পন্ন করতে হবে।"
+                  placeholder="যেমন: বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফারেল কোড ব্যবহার করে ন্যূনতম ১টি দৈনিক চেক-ইন বা কাজ সম্পন্ন করতে হবে।"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs focus:outline-none focus:border-[var(--primary)] resize-y"
                 />
               </div>
@@ -1316,7 +1147,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <strong className="text-[var(--primary)] font-mono-num">
                   ৳{fmtBnReward(referralForm.friendBonus)}
                 </strong>{' '}
-                বোনাস পাবে (শর্ত: ন্যূনতম {toBn(referralForm.minTasks)}টি টাস্ক/স্পিন)।
+                বোনাস পাবে (শর্ত: ন্যূনতম {toBn(referralForm.minTasks)}টি চেক-ইন/কাজ)।
               </div>
             </form>
           </div>
@@ -1704,6 +1535,139 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         {tab === 'withdraw' && data && (
           <div className="space-y-4">
+            <form
+              onSubmit={handleSaveWithdrawalSettings}
+              className="rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-4"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <BkashLogo className="w-9 h-9 shrink-0" />
+                  <div>
+                    <h2 className="text-base font-bold">বিকাশ (bKash) উইথড্র ফি কন্ট্রোল</h2>
+                    <p className="text-xs text-[var(--muted)]">
+                      এখান থেকে উইথড্র ফি সিলেক্ট করলে ইউজারের উত্তোলনের পরিমাণের সাথে ফি যোগ হয়ে ওয়ালেট থেকে কাটবে
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={busyAction}
+                  className="min-h-[42px] px-4 py-2 rounded-xl bg-[#E2136E] hover:bg-[#c81060] text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>ফি সেটিংস সেভ করুন</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3">
+                  <span className="block text-xs font-medium text-[var(--muted)]">ফি এর ধরন নির্বাচন করুন</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setWithdrawalFeeForm((prev) => ({
+                          ...prev,
+                          feeType: 'fixed',
+                          feeValue: prev.feeType === 'fixed' ? prev.feeValue : 0,
+                        }))
+                      }
+                      className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${
+                        withdrawalFeeForm.feeType === 'fixed'
+                          ? 'bg-[#E2136E]/15 border-[#E2136E] text-[#E2136E]'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--muted)]'
+                      }`}
+                    >
+                      নির্দিষ্ট টাকা (৳)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setWithdrawalFeeForm((prev) => ({
+                          ...prev,
+                          feeType: 'percent',
+                          feeValue: prev.feeType === 'percent' ? prev.feeValue : 0,
+                        }))
+                      }
+                      className={`min-h-[40px] px-3 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-colors ${
+                        withdrawalFeeForm.feeType === 'percent'
+                          ? 'bg-[#E2136E]/15 border-[#E2136E] text-[#E2136E]'
+                          : 'bg-[var(--surface)] border-[var(--border)] text-[var(--muted)]'
+                      }`}
+                    >
+                      শতাংশ (%)
+                    </button>
+                  </div>
+
+                  <div>
+                    <span className="block text-xs font-medium text-[var(--muted)] mb-2">দ্রুত ফি সিলেক্ট করুন</span>
+                    <div className="flex flex-wrap gap-2">
+                      {WITHDRAWAL_FEE_PRESETS[withdrawalFeeForm.feeType].map((preset) => {
+                        const active = Number(withdrawalFeeForm.feeValue) === preset;
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() =>
+                              setWithdrawalFeeForm((prev) => ({ ...prev, feeValue: preset }))
+                            }
+                            className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-mono-num font-bold border cursor-pointer transition-colors ${
+                              active
+                                ? 'bg-[#E2136E] border-[#E2136E] text-white'
+                                : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text)] hover:border-[#E2136E]/50'
+                            }`}
+                          >
+                            {preset === 0
+                              ? 'ফ্রি (০)'
+                              : withdrawalFeeForm.feeType === 'percent'
+                                ? `${toBn(preset)}%`
+                                : `৳${toBn(preset)}`}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-3">
+                  <div>
+                    <label htmlFor="cfg-wd-fee" className="block text-xs text-[var(--muted)] mb-1">
+                      কাস্টম ফি পরিমাণ ({withdrawalFeeForm.feeType === 'percent' ? '%' : '৳'})
+                    </label>
+                    <input
+                      id="cfg-wd-fee"
+                      type="number"
+                      min="0"
+                      max={withdrawalFeeForm.feeType === 'percent' ? 50 : 1000}
+                      step="0.01"
+                      value={withdrawalFeeForm.feeValue}
+                      onChange={(e) =>
+                        setWithdrawalFeeForm((prev) => ({
+                          ...prev,
+                          feeValue: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-sm font-mono-num"
+                    />
+                  </div>
+
+                  {(() => {
+                    const sample = calculateWithdrawalTotal(100, withdrawalFeeForm);
+                    return (
+                      <div className="p-3 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-xs space-y-1">
+                        <p className="font-semibold text-[var(--muted)]">উদাহরণ: ইউজার ৳১০০ উত্তোলন করলে</p>
+                        <p className="font-mono-num text-[var(--text)]">
+                          বিকাশে পাবেন <strong>৳{fmtAmount(sample.payoutAmount)}</strong> + ফি{' '}
+                          <strong className="text-[var(--gold)]">৳{fmtAmount(sample.fee)}</strong> = মোট ওয়ালেট থেকে কাটবে{' '}
+                          <strong className="text-[var(--emerald)]">৳{fmtAmount(sample.totalDeducted)}</strong>
+                        </p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            </form>
+
             <div className="flex items-center gap-1 p-1 rounded-xl bg-[var(--surface)] border border-[var(--border)] overflow-x-auto">
               {(
                 [
@@ -1734,30 +1698,40 @@ export const AdminView: React.FC<AdminViewProps> = ({
               ) : (
                 filteredWithdrawals.map((w) => {
                   const decrypted = decryptedNumbers[w.id];
+                  const wdFee = Number(w.fee || 0);
+                  const wdTotal = Number(w.totalAmount ?? w.amount + wdFee);
                   return (
                     <div key={w.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold">
-                          {w.userName} · {w.method} ·{' '}
-                          <span className="font-mono-num text-[var(--primary)]">
-                            {decrypted || w.maskedNumber}
-                          </span>
-                        </p>
-                        <p className="text-xs text-[var(--muted)]">
-                          {w.dateLabel} · স্ট্যাটাস:{' '}
-                          <strong
-                            className={
-                              w.status === 'সম্পন্ন'
-                                ? 'text-[var(--emerald)]'
-                                : w.status === 'বাতিল'
-                                  ? 'text-[var(--danger)]'
-                                  : 'text-[var(--gold)]'
-                            }
-                          >
-                            {w.status}
-                          </strong>{' '}
-                          · পরিমাণ: <span className="font-mono-num">৳{fmtAmount(w.amount)}</span>
-                        </p>
+                      <div className="flex items-center gap-3 min-w-0">
+                        {w.method === 'bKash' && <BkashLogo className="w-8 h-8 shrink-0" />}
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold">
+                            {w.userName} · {w.method} ·{' '}
+                            <span className="font-mono-num text-[var(--primary)]">
+                              {decrypted || w.maskedNumber}
+                            </span>
+                          </p>
+                          <p className="text-xs text-[var(--muted)]">
+                            {w.dateLabel} · স্ট্যাটাস:{' '}
+                            <strong
+                              className={
+                                w.status === 'সম্পন্ন'
+                                  ? 'text-[var(--emerald)]'
+                                  : w.status === 'বাতিল'
+                                    ? 'text-[var(--danger)]'
+                                    : 'text-[var(--gold)]'
+                              }
+                            >
+                              {w.status}
+                            </strong>{' '}
+                            · পাঠাতে হবে: <span className="font-mono-num font-bold">৳{fmtAmount(w.amount)}</span>
+                            {wdFee > 0 && (
+                              <span className="font-mono-num">
+                                {' '}· ফি: ৳{fmtAmount(wdFee)} · মোট কর্তন: ৳{fmtAmount(wdTotal)}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 flex-wrap">
                         {!decrypted && (
@@ -1909,9 +1883,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <span className="font-mono-num">৳{fmtAmount(selectedUser.totalEarned)}</span>
                 </p>
                 <p className="flex justify-between">
-                  <span className="text-[var(--muted)]">আজকের আয় ও স্পিন</span>
+                  <span className="text-[var(--muted)]">আজকের আয়</span>
                   <span className="font-mono-num text-xs">
-                    ৳{fmtAmount(selectedUser.dailyTodayEarn || 0)} · {toBn(selectedUser.dailySpins || 0)} স্পিন
+                    ৳{fmtAmount(selectedUser.dailyTodayEarn || 0)}
                   </span>
                 </p>
                 <p className="flex justify-between">

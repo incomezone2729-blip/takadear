@@ -38,16 +38,26 @@ export interface SignedReceiptResponse {
   verifiedAt: number;
 }
 
-async function getBearerHeaders(): Promise<Record<string, string>> {
+async function getBearerHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const user = auth.currentUser;
   if (!user) {
     throw new Error('অথেনটিকেশন সেশন পাওয়া যায়নি');
   }
-  const token = await user.getIdToken();
+  const token = await user.getIdToken(forceRefresh);
   return {
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
   };
+}
+
+async function fetchWithFreshAuth(url: string, init: Omit<RequestInit, 'headers'>): Promise<Response> {
+  const headers = await getBearerHeaders(false);
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && auth.currentUser) {
+    const refreshedHeaders = await getBearerHeaders(true);
+    return fetch(url, { ...init, headers: refreshedHeaders });
+  }
+  return res;
 }
 
 export async function fetchApiHealth(): Promise<ApiHealthResponse> {
@@ -59,10 +69,8 @@ export async function fetchApiHealth(): Promise<ApiHealthResponse> {
 }
 
 export async function verifyServerSession(): Promise<SessionVerifyResponse> {
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/auth/session', {
+  const res = await fetchWithFreshAuth('/api/auth/session', {
     method: 'POST',
-    headers,
     body: JSON.stringify({}),
   });
   if (!res.ok) {
@@ -76,10 +84,8 @@ export async function encryptFieldOnServer(
   type: 'email' | 'wallet_number' | 'phone' | 'credentials',
   value: string
 ): Promise<EncryptResponse> {
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/secure/encrypt', {
+  const res = await fetchWithFreshAuth('/api/secure/encrypt', {
     method: 'POST',
-    headers,
     body: JSON.stringify({ type, value }),
   });
   if (!res.ok) {
@@ -93,10 +99,8 @@ export async function decryptFieldOnServer(
   encrypted: string,
   ownerUid: string
 ): Promise<string> {
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/secure/decrypt', {
+  const res = await fetchWithFreshAuth('/api/secure/decrypt', {
     method: 'POST',
-    headers,
     body: JSON.stringify({ encrypted, ownerUid }),
   });
   if (!res.ok) {
@@ -111,10 +115,8 @@ export async function decryptBatchOnServer(
   items: Array<{ id: string; encrypted: string }>
 ): Promise<Record<string, string | null>> {
   if (items.length === 0) return {};
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/admin/decrypt-batch', {
+  const res = await fetchWithFreshAuth('/api/admin/decrypt-batch', {
     method: 'POST',
-    headers,
     body: JSON.stringify({ items }),
   });
   if (!res.ok) {
@@ -136,10 +138,8 @@ export interface AdminSecurityStatus {
 }
 
 export async function fetchAdminSecurityStatus(): Promise<AdminSecurityStatus> {
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/admin/security-status', {
+  const res = await fetchWithFreshAuth('/api/admin/security-status', {
     method: 'GET',
-    headers,
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -167,10 +167,8 @@ export async function signRewardReceipt(params: {
   method?: string;
   platform?: 'gmail' | 'facebook';
 }): Promise<SignedReceiptResponse> {
-  const headers = await getBearerHeaders();
-  const res = await fetch('/api/rewards/sign', {
+  const res = await fetchWithFreshAuth('/api/rewards/sign', {
     method: 'POST',
-    headers,
     body: JSON.stringify(params),
   });
   if (!res.ok) {

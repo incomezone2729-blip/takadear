@@ -29,7 +29,7 @@ export const Toast: React.FC<ToastProps> = ({ message, variant = 'default' }) =>
       {variant === 'ok' && <CheckCircle2 className="w-4 h-4 shrink-0" />}
       {variant === 'err' && <AlertCircle className="w-4 h-4 shrink-0" />}
       {(variant === 'default' || variant === 'gold') && <Info className="w-4 h-4 shrink-0" />}
-      <span className="truncate">{message}</span>
+      <span className="line-clamp-2 break-words">{message}</span>
     </div>
   );
 };

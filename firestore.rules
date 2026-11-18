@@ -47,7 +47,8 @@ service cloud.firestore {
           'uid', 'name', 'refCode', 'referredBy', 'balance', 'totalEarned',
           'referrals', 'refEarned', 'streakCount', 'streakLast', 'dailyDate',
           'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks',
-          'theme', 'role', 'suspended', 'suspensionReason', 'suspendedAt', 'createdAt', 'updatedAt'
+          'theme', 'role', 'suspended', 'suspensionReason', 'suspendedAt',
+          'lastSpinAt', 'lastBigSpinAt', 'createdAt', 'updatedAt'
         ])
         && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
@@ -69,6 +70,8 @@ service cloud.firestore {
         && (!('suspended' in data) || data.suspended is bool)
         && (!('suspensionReason' in data) || data.suspensionReason == null || (data.suspensionReason is string && data.suspensionReason.size() <= 240))
         && (!('suspendedAt' in data) || data.suspendedAt == null || data.suspendedAt is timestamp)
+        && (!('lastSpinAt' in data) || data.lastSpinAt == null || data.lastSpinAt is timestamp)
+        && (!('lastBigSpinAt' in data) || data.lastBigSpinAt == null || data.lastBigSpinAt is timestamp)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -94,20 +97,9 @@ service cloud.firestore {
         && data.keys().hasOnly(['userId', 'type', 'amount', 'title', 'icon', 'receiptId', 'receiptSignature', 'createdAt'])
         && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
         && data.type in ['in', 'out']
-        && data.amount is number && data.amount > 0 && data.amount <= 100000
+        && data.amount is number && data.amount > 0 && data.amount <= 150000
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
         && data.icon is string && data.icon.size() >= 1 && data.icon.size() <= 16
-        && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
-        && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
-        && data.createdAt is timestamp;
-    }
-
-    function isValidSpin(data) {
-      return data.keys().hasAll(['userId', 'amount', 'prizeIndex', 'receiptId', 'receiptSignature', 'createdAt'])
-        && data.keys().hasOnly(['userId', 'amount', 'prizeIndex', 'receiptId', 'receiptSignature', 'createdAt'])
-        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
-        && data.amount is number && data.amount > 0 && data.amount <= 2
-        && data.prizeIndex is int && data.prizeIndex >= 0 && data.prizeIndex <= 7
         && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
         && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
         && data.createdAt is timestamp;
@@ -120,7 +112,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'userName', 'method', 'maskedNumber', 'encryptedAccount',
-          'amount', 'status', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
+          'amount', 'fee', 'totalAmount', 'status', 'receiptId', 'receiptSignature', 'createdAt', 'updatedAt'
         ])
         && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
         && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
@@ -128,6 +120,8 @@ service cloud.firestore {
         && data.maskedNumber is string && data.maskedNumber.size() >= 6 && data.maskedNumber.size() <= 20
         && data.encryptedAccount is string && data.encryptedAccount.size() >= 10 && data.encryptedAccount.size() <= 2048
         && data.amount is number && data.amount >= 100 && data.amount <= 100000
+        && (!('fee' in data) || (data.fee is number && data.fee >= 0 && data.fee <= 50000))
+        && (!('totalAmount' in data) || (data.totalAmount is number && data.totalAmount >= 100 && data.totalAmount <= 150000))
         && data.status in ['প্রসেসিং', 'সম্পন্ন', 'বাতিল']
         && data.receiptId is string && data.receiptId.size() >= 4 && data.receiptId.size() <= 64
         && data.receiptSignature is string && data.receiptSignature.size() >= 16 && data.receiptSignature.size() <= 128
@@ -191,40 +185,6 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
-    function isValidRegularTaskFields(enabledVal, limitVal, rewardVal, timerVal, urlVal) {
-      return enabledVal is bool
-        && limitVal is int && limitVal >= 0 && limitVal <= 200
-        && rewardVal is number && rewardVal >= 0.05 && rewardVal <= 500
-        && timerVal is int && timerVal >= 0 && timerVal <= 300
-        && urlVal is string && urlVal.size() <= 500
-        && (urlVal.size() == 0 || urlVal.matches('^https?://[^\\s]+$'));
-    }
-
-    function isValidRegularTaskSettings(data) {
-      return data.keys().hasAll([
-          'adEnabled', 'adLimit', 'adReward', 'adTimer', 'adUrl',
-          'articleEnabled', 'articleLimit', 'articleReward', 'articleTimer', 'articleUrl',
-          'quizEnabled', 'quizLimit', 'quizReward', 'quizTimer', 'quizUrl',
-          'surveyEnabled', 'surveyLimit', 'surveyReward', 'surveyTimer', 'surveyUrl',
-          'appEnabled', 'appLimit', 'appReward', 'appTimer', 'appUrl',
-          'updatedAt'
-        ])
-        && data.keys().hasOnly([
-          'adEnabled', 'adLimit', 'adReward', 'adTimer', 'adUrl',
-          'articleEnabled', 'articleLimit', 'articleReward', 'articleTimer', 'articleUrl',
-          'quizEnabled', 'quizLimit', 'quizReward', 'quizTimer', 'quizUrl',
-          'surveyEnabled', 'surveyLimit', 'surveyReward', 'surveyTimer', 'surveyUrl',
-          'appEnabled', 'appLimit', 'appReward', 'appTimer', 'appUrl',
-          'updatedAt'
-        ])
-        && isValidRegularTaskFields(data.adEnabled, data.adLimit, data.adReward, data.adTimer, data.adUrl)
-        && isValidRegularTaskFields(data.articleEnabled, data.articleLimit, data.articleReward, data.articleTimer, data.articleUrl)
-        && isValidRegularTaskFields(data.quizEnabled, data.quizLimit, data.quizReward, data.quizTimer, data.quizUrl)
-        && isValidRegularTaskFields(data.surveyEnabled, data.surveyLimit, data.surveyReward, data.surveyTimer, data.surveyUrl)
-        && isValidRegularTaskFields(data.appEnabled, data.appLimit, data.appReward, data.appTimer, data.appUrl)
-        && data.updatedAt is timestamp;
-    }
-
     function isValidReferralSettings(data) {
       return data.keys().hasAll(['referrerBonus', 'friendBonus', 'minTasks', 'updatedAt'])
         && data.keys().hasOnly(['referrerBonus', 'friendBonus', 'minTasks', 'conditionNote', 'updatedAt'])
@@ -232,6 +192,19 @@ service cloud.firestore {
         && data.friendBonus is number && data.friendBonus >= 0 && data.friendBonus <= 100
         && data.minTasks is int && data.minTasks >= 0 && data.minTasks <= 10
         && (!('conditionNote' in data) || data.conditionNote == null || (data.conditionNote is string && data.conditionNote.size() <= 300))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWithdrawalSettings(data) {
+      return data.keys().hasAll(['feeType', 'feeValue', 'updatedAt'])
+        && data.keys().hasOnly(['feeType', 'feeValue', 'updatedAt'])
+        && data.feeType in ['fixed', 'percent']
+        && data.feeValue is number
+        && data.feeValue >= 0
+        && (
+          (data.feeType == 'fixed' && data.feeValue <= 1000)
+          || (data.feeType == 'percent' && data.feeValue <= 50)
+        )
         && data.updatedAt is timestamp;
     }
 
@@ -295,7 +268,7 @@ service cloud.firestore {
     }
 
     function isNotSuspendedExisting() {
-      return !('suspended' in existing()) || existing().suspended == false;
+      return !('suspended' in existing()) || existing().suspended == false || existing().suspended == null;
     }
 
     function sameMoneyDelta(aNew, aOld, bNew, bOld) {
@@ -311,6 +284,16 @@ service cloud.firestore {
         );
     }
 
+    function sameLastSpinAt() {
+      return ('lastSpinAt' in existing() && 'lastSpinAt' in incoming() && incoming().lastSpinAt == existing().lastSpinAt)
+        || (!('lastSpinAt' in existing()) && (!('lastSpinAt' in incoming()) || incoming().lastSpinAt == null));
+    }
+
+    function sameLastBigSpinAt() {
+      return ('lastBigSpinAt' in existing() && 'lastBigSpinAt' in incoming() && incoming().lastBigSpinAt == existing().lastBigSpinAt)
+        || (!('lastBigSpinAt' in existing()) && (!('lastBigSpinAt' in incoming()) || incoming().lastBigSpinAt == null));
+    }
+
     function streakAdvancedToday() {
       return incoming().streakLast == incoming().dailyDate
         && (!('streakLast' in existing()) || existing().streakLast != incoming().dailyDate)
@@ -322,6 +305,8 @@ service cloud.firestore {
         && incoming().balance == existing().balance
         && incoming().totalEarned == existing().totalEarned
         && sameStreakState()
+        && sameLastSpinAt()
+        && sameLastBigSpinAt()
         && incoming().dailySpins == 0
         && incoming().dailyAds == 0
         && incoming().dailyTodayEarn == 0
@@ -330,9 +315,11 @@ service cloud.firestore {
 
     function isDailyCheckinAction() {
       return incoming().balance > existing().balance
-        && incoming().balance <= existing().balance + 1
+        && incoming().balance <= existing().balance + 1.001
         && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
         && streakAdvancedToday()
+        && sameLastSpinAt()
+        && sameLastBigSpinAt()
         && (
           incoming().dailyDate == existing().dailyDate
             ? (
@@ -343,53 +330,6 @@ service cloud.firestore {
             )
             : (
               incoming().dailySpins == 0
-              && incoming().dailyAds == 0
-              && incoming().dailyTasks.size() == 0
-              && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
-            )
-        );
-    }
-
-    function isTaskEarningAction() {
-      return incoming().balance > existing().balance
-        && incoming().balance <= existing().balance + 500
-        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
-        && sameStreakState()
-        && (
-          incoming().dailyDate == existing().dailyDate
-            ? (
-              incoming().dailySpins == existing().dailySpins
-              && incoming().dailyAds >= existing().dailyAds
-              && incoming().dailyAds <= existing().dailyAds + 1
-              && incoming().dailyTasks != existing().dailyTasks
-              && incoming().dailyTasks.size() >= existing().dailyTasks.size()
-              && sameMoneyDelta(incoming().dailyTodayEarn, existing().dailyTodayEarn, incoming().balance, existing().balance)
-            )
-            : (
-              incoming().dailySpins == 0
-              && incoming().dailyAds >= 0
-              && incoming().dailyAds <= 1
-              && incoming().dailyTasks.size() == 1
-              && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
-            )
-        );
-    }
-
-    function isSpinEarningAction() {
-      return incoming().balance > existing().balance
-        && incoming().balance <= existing().balance + 2
-        && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
-        && sameStreakState()
-        && (
-          incoming().dailyDate == existing().dailyDate
-            ? (
-              incoming().dailySpins == existing().dailySpins + 1
-              && incoming().dailyAds == existing().dailyAds
-              && incoming().dailyTasks == existing().dailyTasks
-              && sameMoneyDelta(incoming().dailyTodayEarn, existing().dailyTodayEarn, incoming().balance, existing().balance)
-            )
-            : (
-              incoming().dailySpins == 1
               && incoming().dailyAds == 0
               && incoming().dailyTasks.size() == 0
               && sameMoneyDelta(incoming().dailyTodayEarn, 0, incoming().balance, existing().balance)
@@ -410,7 +350,8 @@ service cloud.firestore {
       return isNotSuspendedExisting()
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'balance', 'totalEarned', 'streakCount', 'streakLast',
-          'dailyDate', 'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks', 'updatedAt'
+          'dailyDate', 'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks',
+          'lastSpinAt', 'lastBigSpinAt', 'updatedAt'
         ])
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
@@ -418,8 +359,6 @@ service cloud.firestore {
         && (
           isDailyCounterRolloverAction()
           || isDailyCheckinAction()
-          || isTaskEarningAction()
-          || isSpinEarningAction()
         );
     }
 
@@ -432,8 +371,8 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().referrals == existing().referrals + 1
-        && incoming().refEarned >= existing().refEarned + 0.5
-        && incoming().refEarned <= existing().refEarned + 100
+        && incoming().refEarned >= existing().refEarned + 0.499
+        && incoming().refEarned <= existing().refEarned + 100.001
         && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
         && sameMoneyDelta(incoming().balance, existing().balance, incoming().refEarned, existing().refEarned);
     }
@@ -447,7 +386,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().balance > existing().balance
-        && incoming().balance <= existing().balance + 100
+        && incoming().balance <= existing().balance + 100.001
         && sameMoneyDelta(incoming().balance, existing().balance, incoming().totalEarned, existing().totalEarned)
         && existsAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid))
         && getAfter(/databases/$(database)/documents/referralClaims/$(request.auth.uid)).data.referredUid == request.auth.uid
@@ -468,8 +407,65 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && incoming().balance < existing().balance
-        && (existing().balance - incoming().balance) >= 100
-        && (existing().balance - incoming().balance) <= 100000;
+        && (existing().balance - incoming().balance) >= 99.999
+        && (existing().balance - incoming().balance) <= 150000.001;
+    }
+
+    function isMatchingWithdrawalFee(wd) {
+      return (
+        !exists(/databases/$(database)/documents/taskSettings/withdrawal_settings)
+        && wd.fee == 0
+      ) || (
+        exists(/databases/$(database)/documents/taskSettings/withdrawal_settings)
+        && (
+          (
+            get(/databases/$(database)/documents/taskSettings/withdrawal_settings).data.feeType == 'fixed'
+            && sameMoneyDelta(
+              wd.fee,
+              0,
+              get(/databases/$(database)/documents/taskSettings/withdrawal_settings).data.feeValue,
+              0
+            )
+          )
+          || (
+            get(/databases/$(database)/documents/taskSettings/withdrawal_settings).data.feeType == 'percent'
+            && (wd.fee - ((wd.amount * get(/databases/$(database)/documents/taskSettings/withdrawal_settings).data.feeValue) / 100.0)) <= 0.011
+            && (((wd.amount * get(/databases/$(database)/documents/taskSettings/withdrawal_settings).data.feeValue) / 100.0) - wd.fee) <= 0.011
+          )
+        )
+      );
+    }
+
+    function isLegacySchemaRepairAction() {
+      return (!isValidUserAccount(existing()) || (!isAdmin() && existing().role != 'user'))
+        && (!('suspended' in existing()) || existing().suspended == false || existing().suspended == null)
+        && (!('suspended' in incoming()) || incoming().suspended == false)
+        && incoming().uid == request.auth.uid
+        && (!('uid' in existing()) || existing().uid == null || existing().uid == '' || existing().uid == request.auth.uid)
+        && (incoming().role == 'user' || (isAdmin() && incoming().role == 'admin'))
+        && incoming().balance == (('balance' in existing() && existing().balance is number && existing().balance >= 0 && existing().balance <= 10000000) ? existing().balance : 0)
+        && incoming().totalEarned == (('totalEarned' in existing() && existing().totalEarned is number && existing().totalEarned >= 0 && existing().totalEarned <= 10000000) ? existing().totalEarned : 0)
+        && incoming().referrals == (('referrals' in existing() && existing().referrals is number && existing().referrals >= 0 && existing().referrals <= 100000) ? int(existing().referrals) : 0)
+        && incoming().refEarned == (('refEarned' in existing() && existing().refEarned is number && existing().refEarned >= 0 && existing().refEarned <= 10000000) ? existing().refEarned : 0)
+        && (
+          ('createdAt' in existing() && existing().createdAt is timestamp && incoming().createdAt == existing().createdAt)
+          || ((!('createdAt' in existing()) || !(existing().createdAt is timestamp)) && incoming().createdAt == request.time)
+        )
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).addedKeys().hasOnly([
+          'uid', 'name', 'refCode', 'referredBy', 'balance', 'totalEarned',
+          'referrals', 'refEarned', 'streakCount', 'streakLast', 'dailyDate',
+          'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks', 'theme', 'role',
+          'suspended', 'suspensionReason', 'suspendedAt', 'lastSpinAt', 'lastBigSpinAt',
+          'createdAt', 'updatedAt'
+        ])
+        && incoming().diff(existing()).changedKeys().hasOnly([
+          'uid', 'name', 'refCode', 'referredBy', 'balance', 'totalEarned',
+          'referrals', 'refEarned', 'streakCount', 'streakLast', 'dailyDate',
+          'dailySpins', 'dailyAds', 'dailyTodayEarn', 'dailyTasks', 'theme', 'role',
+          'suspended', 'suspensionReason', 'suspendedAt', 'lastSpinAt', 'lastBigSpinAt',
+          'createdAt', 'updatedAt'
+        ]);
     }
 
     function isAdminUserAdjustmentAction() {
@@ -511,6 +507,7 @@ service cloud.firestore {
             || isReferralClaimAction()
             || isFriendReferralBonusAction()
             || isWithdrawalDeductionAction()
+            || isLegacySchemaRepairAction()
           ))
         );
 
@@ -547,12 +544,7 @@ service cloud.firestore {
       match /spins/{spinId} {
         allow get: if isValidId(userId) && isValidId(spinId) && (isOwner(userId) || isAdmin());
         allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-        allow create: if isValidId(userId) && isValidId(spinId)
-          && isOwner(userId)
-          && isValidSpin(incoming())
-          && incoming().userId == request.auth.uid
-          && incoming().createdAt == request.time;
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
     }
 
@@ -564,6 +556,11 @@ service cloud.firestore {
         && isSignedIn()
         && isValidWithdrawal(incoming())
         && incoming().userId == request.auth.uid
+        && incoming().method == 'bKash'
+        && 'fee' in incoming()
+        && 'totalAmount' in incoming()
+        && sameMoneyDelta(incoming().totalAmount, incoming().amount, incoming().fee, 0)
+        && isMatchingWithdrawalFee(incoming())
         && incoming().status == 'প্রসেসিং'
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
@@ -666,7 +663,7 @@ service cloud.firestore {
 
     match /taskSettings/{settingId} {
       allow get: if isValidId(settingId)
-        && (settingId == 'account_sell' || settingId == 'regular_tasks' || settingId == 'referral_settings')
+        && (settingId == 'account_sell' || settingId == 'referral_settings' || settingId == 'withdrawal_settings')
         && isSignedIn();
       allow list: if false;
       allow create, update: if isValidId(settingId)
@@ -674,8 +671,8 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (settingId == 'account_sell' && isValidTaskSettings(incoming()))
-          || (settingId == 'regular_tasks' && isValidRegularTaskSettings(incoming()))
           || (settingId == 'referral_settings' && isValidReferralSettings(incoming()))
+          || (settingId == 'withdrawal_settings' && isValidWithdrawalSettings(incoming()))
         );
       allow delete: if false;
     }

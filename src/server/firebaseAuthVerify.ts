@@ -19,6 +19,22 @@ const GOOGLE_CERTS_URL =
   'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
 
 let certCache: CertCache | null = null;
+let googleClockOffsetMs = 0;
+
+export const TOKEN_CLOCK_LEEWAY_SEC = 60;
+
+export function parseHttpDateMs(dateHeader: string | null | undefined): number | null {
+  if (!dateHeader) return null;
+  const parsed = Date.parse(dateHeader);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function getCalibratedNowSec(
+  localNowMs: number = Date.now(),
+  offsetMs: number = googleClockOffsetMs
+): number {
+  return Math.floor((localNowMs + offsetMs) / 1000);
+}
 
 async function fetchGoogleCerts(): Promise<Record<string, string>> {
   const now = Date.now();
@@ -29,6 +45,10 @@ async function fetchGoogleCerts(): Promise<Record<string, string>> {
   const res = await fetch(GOOGLE_CERTS_URL);
   if (!res.ok) {
     throw new Error(`Failed to fetch Firebase public keys: HTTP ${res.status}`);
+  }
+  const serverDateMs = parseHttpDateMs(res.headers.get('date'));
+  if (serverDateMs !== null) {
+    googleClockOffsetMs = serverDateMs - Date.now();
   }
   const certs = (await res.json()) as Record<string, string>;
   const cacheControl = res.headers.get('cache-control') || '';
@@ -47,6 +67,42 @@ function decodeBase64UrlJson<T>(segment: string): T {
   return JSON.parse(json) as T;
 }
 
+export interface DecodedFirebaseJwtPayload {
+  iss?: string;
+  aud?: string;
+  sub?: string;
+  exp?: number;
+  iat?: number;
+  auth_time?: number;
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+}
+
+export function validateDecodedFirebaseClaims(
+  payload: DecodedFirebaseJwtPayload,
+  expectedProjectId: string,
+  calibratedNowSec: number = getCalibratedNowSec()
+): void {
+  const expectedIssuer = `https://securetoken.google.com/${expectedProjectId}`;
+
+  if (payload.iss !== expectedIssuer) {
+    throw new Error('Invalid token issuer');
+  }
+  if (payload.aud !== expectedProjectId) {
+    throw new Error('Invalid token audience');
+  }
+  if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.length > 128) {
+    throw new Error('Invalid token subject');
+  }
+  if (!payload.exp || payload.exp <= calibratedNowSec - TOKEN_CLOCK_LEEWAY_SEC) {
+    throw new Error('Token expired');
+  }
+  if (!payload.iat || payload.iat > calibratedNowSec + 300) {
+    throw new Error('Invalid token issued-at time');
+  }
+}
+
 export async function verifyFirebaseIdToken(
   idToken: string,
   expectedProjectId: string
@@ -58,42 +114,16 @@ export async function verifyFirebaseIdToken(
 
   const [headerB64, payloadB64, signatureB64] = parts;
   const header = decodeBase64UrlJson<{ alg?: string; kid?: string }>(headerB64);
-  const payload = decodeBase64UrlJson<{
-    iss?: string;
-    aud?: string;
-    sub?: string;
-    exp?: number;
-    iat?: number;
-    auth_time?: number;
-    email?: string;
-    email_verified?: boolean;
-    name?: string;
-  }>(payloadB64);
+  const payload = decodeBase64UrlJson<DecodedFirebaseJwtPayload>(payloadB64);
 
   if (header.alg !== 'RS256' || !header.kid) {
     throw new Error('Unsupported JWT header');
   }
 
-  const expectedIssuer = `https://securetoken.google.com/${expectedProjectId}`;
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  if (payload.iss !== expectedIssuer) {
-    throw new Error('Invalid token issuer');
-  }
-  if (payload.aud !== expectedProjectId) {
-    throw new Error('Invalid token audience');
-  }
-  if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.length > 128) {
-    throw new Error('Invalid token subject');
-  }
-  if (!payload.exp || payload.exp <= nowSec) {
-    throw new Error('Token expired');
-  }
-  if (!payload.iat || payload.iat > nowSec + 300) {
-    throw new Error('Invalid token issued-at time');
-  }
-
+  // Ensure Google public certs (and authoritative UTC Date header offset) are loaded before checking claims
   const certs = await fetchGoogleCerts();
+  validateDecodedFirebaseClaims(payload, expectedProjectId, getCalibratedNowSec());
+
   const certPem = certs[header.kid];
   if (!certPem) {
     // Force refresh once in case of key rotation
@@ -114,15 +144,7 @@ function verifySignatureAndBuild(
   headerB64: string,
   payloadB64: string,
   signatureB64: string,
-  payload: {
-    iss?: string;
-    aud?: string;
-    sub?: string;
-    exp?: number;
-    email?: string;
-    email_verified?: boolean;
-    name?: string;
-  }
+  payload: DecodedFirebaseJwtPayload
 ): VerifiedFirebaseToken {
   const verifier = crypto.createVerify('RSA-SHA256');
   verifier.update(`${headerB64}.${payloadB64}`);

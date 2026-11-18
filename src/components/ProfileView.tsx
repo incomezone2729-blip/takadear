@@ -117,7 +117,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </li>
               <li>
                 {referralSettings.minTasks > 0
-                  ? `বন্ধুকে কমপক্ষে ${toBn(referralSettings.minTasks)}টি টাস্ক বা স্পিন সম্পন্ন করতে হবে, তবেই উভয়ের বোনাস যোগ হবে।`
+                  ? `বন্ধুকে কমপক্ষে ${toBn(referralSettings.minTasks)}টি দৈনিক চেক-ইন বা কাজ সম্পন্ন করতে হবে, তবেই উভয়ের বোনাস যোগ হবে।`
                   : 'অ্যাকাউন্ট খোলার পর প্রথম কার্যক্রমেই বোনাস আনলক হবে।'}
               </li>
               {referralSettings.conditionNote && <li>{referralSettings.conditionNote}</li>}
@@ -140,7 +140,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <span>
                   আপনার স্বাগত রেফারেল বোনাস (+৳{fmtBnReward(inviteeStatus.friendAmount)}): শর্ত পূরণ (
                   {toBn(Math.min(inviteeStatus.completedCount, inviteeStatus.minTasks))}/
-                  {toBn(inviteeStatus.minTasks)} টাস্ক বা স্পিন) সম্পন্ন হলেই ব্যালেন্সে যোগ হবে।
+                  {toBn(inviteeStatus.minTasks)} দৈনিক চেক-ইন বা কাজ) সম্পন্ন হলেই ব্যালেন্সে যোগ হবে।
                 </span>
               )}
             </div>

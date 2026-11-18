@@ -59,29 +59,38 @@ test('Dirty Dozen security invariants and tightened reward bounds are guarded in
   // 6. Terminal state locking on withdrawals and account submissions
   assert.match(rulesContent, /existing\(\)\.status\s*==\s*'প্রসেসিং'/);
   assert.match(rulesContent, /existing\(\)\.status\s*==\s*'পেন্ডিং'/);
-  // 7. Tightened referral (2), signup (0), and spin (<=2) limits
+  // 7. Tightened referral (2) and signup (0) limits, spin creation disabled
   assert.match(rulesContent, /incoming\(\)\.amount\s*==\s*2/);
-  assert.match(rulesContent, /data\.amount\s*<=\s*2/);
   assert.match(rulesContent, /incoming\(\)\.balance\s*==\s*0/);
   assert.doesNotMatch(rulesContent, /incoming\(\)\.balance\s*==\s*4/);
-  // 8. Admin-controlled regular tasks, referral settings, and sell enablement enforcement
-  assert.match(rulesContent, /function isValidRegularTaskSettings\(data\)/);
+  assert.doesNotMatch(rulesContent, /isTaskEarningAction/);
+  assert.doesNotMatch(rulesContent, /isSpinEarningAction/);
+  assert.doesNotMatch(rulesContent, /isValidRegularTaskSettings/);
+  assert.match(rulesContent, /match \/spins\/\{spinId\}[\s\S]*allow create, update, delete:\s*if false;/);
+  // 8. Admin-controlled referral settings and sell enablement enforcement
   assert.match(rulesContent, /function isValidReferralSettings\(data\)/);
   assert.match(rulesContent, /function isFriendReferralBonusAction\(\)/);
-  assert.match(rulesContent, /settingId\s*==\s*'regular_tasks'/);
   assert.match(rulesContent, /settingId\s*==\s*'referral_settings'/);
   assert.match(rulesContent, /gmailEnabled\s*==\s*true/);
   assert.match(rulesContent, /facebookEnabled\s*==\s*true/);
-  assert.match(rulesContent, /data\.dailyAds\s*<=\s*200/);
-  assert.match(rulesContent, /existing\(\)\.balance\s*\+\s*500/);
   // 9. Strict wallet delta parity & work-counter causality (no free balance shifts)
   assert.match(rulesContent, /function sameMoneyDelta\(aNew, aOld, bNew, bOld\)/);
+  assert.match(rulesContent, /function sameLastSpinAt\(\)/);
+  assert.match(rulesContent, /function sameLastBigSpinAt\(\)/);
   assert.match(rulesContent, /function isDailyCounterRolloverAction\(\)/);
   assert.match(rulesContent, /function isDailyCheckinAction\(\)/);
-  assert.match(rulesContent, /function isTaskEarningAction\(\)/);
-  assert.match(rulesContent, /function isSpinEarningAction\(\)/);
+  assert.match(rulesContent, /'lastSpinAt',\s*'lastBigSpinAt'/);
   assert.match(rulesContent, /getAfter\(\/databases\/\$\(database\)\/documents\/referralClaims\/\$\(request\.auth\.uid\)\)/);
-  assert.match(rulesContent, /\(existing\(\)\.balance - incoming\(\)\.balance\) <= 100000/);
-  // 10. Immutable transactions, spins, and support messages
+  assert.match(rulesContent, /\(existing\(\)\.balance - incoming\(\)\.balance\) <= 150000\.001/);
+  assert.match(rulesContent, /\(existing\(\)\.balance - incoming\(\)\.balance\) >= 99\.999/);
+  assert.match(rulesContent, /existing\(\)\.balance\s*\+\s*1\.001/);
+  assert.match(rulesContent, /function isLegacySchemaRepairAction\(\)/);
+  // 10. bKash-only new withdrawals and admin-controlled withdrawal fee enforcement
+  assert.match(rulesContent, /function isValidWithdrawalSettings\(data\)/);
+  assert.match(rulesContent, /function isMatchingWithdrawalFee\(wd\)/);
+  assert.match(rulesContent, /settingId\s*==\s*'withdrawal_settings'/);
+  assert.match(rulesContent, /incoming\(\)\.method\s*==\s*'bKash'/);
+  assert.match(rulesContent, /sameMoneyDelta\(incoming\(\)\.totalAmount,\s*incoming\(\)\.amount,\s*incoming\(\)\.fee,\s*0\)/);
+  // 11. Immutable transactions and support messages
   assert.match(rulesContent, /allow update, delete:\s*if false;/);
 });

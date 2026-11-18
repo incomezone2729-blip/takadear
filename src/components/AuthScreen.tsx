@@ -135,11 +135,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           <img
             src="/logo.png"
             alt="টাকাডিয়ার লোগো"
-            className="w-14 h-14 rounded-2xl object-cover shadow-md border border-[var(--border)] bg-white/10"
+            className="w-14 h-14 rounded-2xl object-cover shadow-md border border-[var(--border)] shrink-0 select-none"
           />
           <div>
             <h1 className="text-xl font-bold tracking-tight leading-tight">টাকাডিয়ার (TakaDear)</h1>
-            <p className="text-xs text-[var(--muted)]">দৈনিক টাস্ক, স্পিন ও রিওয়ার্ড ওয়ালেট</p>
+            <p className="text-xs text-[var(--muted)]">দৈনিক চেক-ইন, অ্যাকাউন্ট কাজ ও রিওয়ার্ড ওয়ালেট</p>
           </div>
         </header>
 

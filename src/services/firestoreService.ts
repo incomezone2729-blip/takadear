@@ -1,6 +1,7 @@
 import type { User } from 'firebase/auth';
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocFromServer,
@@ -18,16 +19,20 @@ import {
   writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import {
   addMoney,
+  analyzeLegacyUserAccount,
   calculateNextStreak,
+  calculateWithdrawalTotal,
   computeNextWalletState,
-  CONTROLLABLE_TASK_IDS,
+  computeRewardCreditState,
   countCompletedActivities,
   DEFAULT_ACCOUNT_SELL_SETTINGS,
   DEFAULT_REFERRAL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
+  DEFAULT_WITHDRAWAL_SETTINGS,
+  deriveDisplayName,
+  fmtAmount,
   formatBnDate,
   generateRefCode,
   isReferralQualified,
@@ -37,20 +42,16 @@ import {
   REFERRAL_BONUS,
   roundMoney,
   sortSupportThreads,
-  SPIN_LIMIT,
   todayKey,
   validateWithdrawal,
-  WHEEL_SEGMENTS,
   yesterdayKey,
   type AccountPlatform,
   type AccountSellSettingsConfig,
   type AccountSubmissionStatus,
-  type ControllableTaskId,
   type PaymentMethod,
   type ReferralSettingsConfig,
-  type RegularTaskSettingsMap,
-  type TaskConfig,
   type ThemeMode,
+  type WithdrawalSettingsConfig,
   type WithdrawalStatus,
 } from '../utils/takadearLogic';
 import {
@@ -82,6 +83,8 @@ export interface UserAccount {
   suspended?: boolean;
   suspensionReason?: string | null;
   suspendedAt?: Timestamp | null;
+  lastSpinAt?: Timestamp | null;
+  lastBigSpinAt?: Timestamp | null;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   // Runtime-hydrated display fields for verified Admin Dashboard only (stored isolated in private/vault)
@@ -111,17 +114,6 @@ export interface TransactionRecord {
   dateLabel: string;
 }
 
-export interface SpinRecord {
-  id: string;
-  userId: string;
-  amount: number;
-  prizeIndex: number;
-  receiptId: string;
-  receiptSignature: string;
-  createdAtMs: number;
-  dateLabel: string;
-}
-
 export interface WithdrawalRecord {
   id: string;
   userId: string;
@@ -130,6 +122,8 @@ export interface WithdrawalRecord {
   maskedNumber: string;
   encryptedAccount: string;
   amount: number;
+  fee?: number;
+  totalAmount?: number;
   status: WithdrawalStatus;
   receiptId: string;
   receiptSignature: string;
@@ -205,36 +199,205 @@ function enqueueWalletOp<T>(uid: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function getUserDocPreferServer(userRef: ReturnType<typeof doc>, maxRetries = 3) {
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      return await getDocFromServer(userRef);
-    } catch (serverErr) {
-      lastErr = serverErr;
-      // If document is present in local cache, return it
-      try {
-        const cached = await getDoc(userRef);
-        if (cached.exists()) {
-          return cached;
-        }
-      } catch {
-        // Not in local cache
-      }
+async function getUserDocPreferServer(
+  userRef: ReturnType<typeof doc>,
+  options?: { allowEmptyCache?: boolean }
+) {
+  try {
+    return await getDocFromServer(userRef);
+  } catch (err) {
+    const code = (err as { code?: string })?.code || '';
+    if (code === 'permission-denied') {
+      throw err;
+    }
+    const cached = await getDoc(userRef);
+    if (cached.exists() || options?.allowEmptyCache) {
+      return cached;
+    }
+    throw err;
+  }
+}
 
-      // If client is still establishing backend connection, backoff and retry
-      if (attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
-      }
+export async function fetchUserAccountSnapshot(uid: string): Promise<UserAccount | null> {
+  try {
+    const snap = await getUserDocPreferServer(doc(db, 'users', uid), { allowEmptyCache: true });
+    return snap.exists() ? (snap.data() as UserAccount) : null;
+  } catch {
+    return null;
+  }
+}
+
+function isFirestoreSdkTimestamp(value: unknown): boolean {
+  return (
+    value instanceof Timestamp ||
+    (value !== null &&
+      typeof value === 'object' &&
+      typeof (value as { toMillis?: unknown }).toMillis === 'function')
+  );
+}
+
+function sanitizeRawTimestampsForRepair(raw: Record<string, unknown>): Record<string, unknown> {
+  const copy: Record<string, unknown> = { ...raw };
+  for (const key of ['createdAt', 'updatedAt', 'lastSpinAt', 'lastBigSpinAt', 'suspendedAt'] as const) {
+    const val = copy[key];
+    if (val !== undefined && val !== null && !isFirestoreSdkTimestamp(val)) {
+      copy[key] = '__invalid_non_timestamp__';
     }
   }
+  return copy;
+}
 
-  // Final fallback
+function isPermissionDeniedError(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  if (code === 'permission-denied') return true;
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return msg.toLowerCase().includes('missing or insufficient permissions');
+}
+
+function logUserRuleDiagnostic(
+  action: string,
+  uid: string,
+  raw: Record<string, unknown> | null,
+  extra?: Record<string, unknown>
+): void {
   try {
-    return await getDoc(userRef);
-  } catch (finalErr) {
-    throw lastErr || finalErr;
+    const keys = raw ? Object.keys(raw).sort() : [];
+    console.error('[FirestoreRuleDiagnostic]', {
+      action,
+      uid,
+      keys,
+      role: raw?.role ?? null,
+      suspended: raw?.suspended ?? null,
+      balanceType: raw ? typeof raw.balance : null,
+      totalEarnedType: raw ? typeof raw.totalEarned : null,
+      referralsInt: raw ? Number.isInteger(raw.referrals) : null,
+      streakInt: raw ? Number.isInteger(raw.streakCount) : null,
+      dailySpinsInt: raw ? Number.isInteger(raw.dailySpins) : null,
+      dailyAdsInt: raw ? Number.isInteger(raw.dailyAds) : null,
+      dailyTodayEarnType: raw ? typeof raw.dailyTodayEarn : null,
+      createdAtValidTs: raw ? isFirestoreSdkTimestamp(raw.createdAt) : false,
+      updatedAtValidTs: raw ? isFirestoreSdkTimestamp(raw.updatedAt) : false,
+      lastSpinAtNullOrTs: raw ? raw.lastSpinAt == null || isFirestoreSdkTimestamp(raw.lastSpinAt) : true,
+      lastBigSpinAtNullOrTs: raw
+        ? raw.lastBigSpinAt == null || isFirestoreSdkTimestamp(raw.lastBigSpinAt)
+        : true,
+      ...(extra || {}),
+    });
+  } catch {
+    // Non-fatal diagnostic logger
   }
+}
+
+async function repairLegacyUserDocIfNeeded(
+  userRef: ReturnType<typeof doc>,
+  uid: string,
+  email: string,
+  today: string,
+  fallbackDisplayName?: string
+): Promise<UserAccount | null> {
+  const snap = await getUserDocPreferServer(userRef);
+  if (!snap.exists()) return null;
+  const raw = snap.data() as Record<string, unknown>;
+  if (raw.suspended === true) {
+    return raw as unknown as UserAccount;
+  }
+
+  const repairPlan = analyzeLegacyUserAccount(
+    sanitizeRawTimestampsForRepair(raw),
+    uid,
+    email,
+    today,
+    fallbackDisplayName
+  );
+  if (!repairPlan.needsRepair) {
+    return raw as unknown as UserAccount;
+  }
+
+  let repairedAccount = raw as unknown as UserAccount;
+  try {
+    await runTransaction(db, async (tx) => {
+      const latestSnap = await tx.get(userRef);
+      if (!latestSnap.exists()) return;
+      const latestRaw = latestSnap.data() as Record<string, unknown>;
+      if (latestRaw.suspended === true) {
+        repairedAccount = latestRaw as unknown as UserAccount;
+        return;
+      }
+      const livePlan = analyzeLegacyUserAccount(
+        sanitizeRawTimestampsForRepair(latestRaw),
+        uid,
+        email,
+        today,
+        fallbackDisplayName
+      );
+      if (!livePlan.needsRepair) {
+        repairedAccount = latestRaw as unknown as UserAccount;
+        return;
+      }
+      const updatePayload: Record<string, unknown> = {
+        ...livePlan.patch,
+        referrals: Math.trunc(
+          Number(
+            'referrals' in livePlan.patch
+              ? livePlan.patch.referrals
+              : Number.isInteger(latestRaw.referrals)
+                ? latestRaw.referrals
+                : 0
+          )
+        ),
+        streakCount: Math.trunc(
+          Number(
+            'streakCount' in livePlan.patch
+              ? livePlan.patch.streakCount
+              : Number.isInteger(latestRaw.streakCount)
+                ? latestRaw.streakCount
+                : 0
+          )
+        ),
+        dailySpins: Math.trunc(
+          Number(
+            'dailySpins' in livePlan.patch
+              ? livePlan.patch.dailySpins
+              : Number.isInteger(latestRaw.dailySpins)
+                ? latestRaw.dailySpins
+                : 0
+          )
+        ),
+        dailyAds: Math.trunc(
+          Number(
+            'dailyAds' in livePlan.patch
+              ? livePlan.patch.dailyAds
+              : Number.isInteger(latestRaw.dailyAds)
+                ? latestRaw.dailyAds
+                : 0
+          )
+        ),
+        updatedAt: serverTimestamp(),
+      };
+      if (livePlan.needsCreatedAt) {
+        updatePayload.createdAt = serverTimestamp();
+      }
+      for (const delKey of livePlan.keysToDelete) {
+        updatePayload[delKey] = deleteField();
+      }
+      tx.update(userRef, updatePayload);
+    });
+  } catch (err) {
+    if (isPermissionDeniedError(err)) {
+      logUserRuleDiagnostic('repairLegacyUserDocIfNeeded', uid, raw, {
+        repairKeys: Object.keys(repairPlan.patch),
+        keysToDelete: repairPlan.keysToDelete,
+        needsCreatedAt: repairPlan.needsCreatedAt,
+      });
+    }
+    throw err;
+  }
+
+  const refreshedSnap = await getUserDocPreferServer(userRef);
+  if (refreshedSnap.exists()) {
+    repairedAccount = refreshedSnap.data() as UserAccount;
+  }
+  return repairedAccount;
 }
 
 export async function ensureUserAccount(
@@ -252,10 +415,28 @@ export async function ensureUserAccount(
     }
 
     const today = todayKey();
+    const resolvedEmail = user.email || `${user.uid}@takadear.app`;
+    const fallbackName = options?.displayName || user.displayName || undefined;
+
     if (snap.exists()) {
-      const raw = snap.data() as UserAccount;
-      let currentAccount = raw;
-      if (raw.dailyDate !== today) {
+      let currentAccount = snap.data() as UserAccount;
+
+      try {
+        const repaired = await repairLegacyUserDocIfNeeded(
+          userRef,
+          user.uid,
+          resolvedEmail,
+          today,
+          fallbackName
+        );
+        if (repaired) {
+          currentAccount = repaired;
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+      }
+
+      if (currentAccount.dailyDate !== today) {
         try {
           await runTransaction(db, async (tx) => {
             const latestSnap = await tx.get(userRef);
@@ -305,17 +486,51 @@ export async function ensureUserAccount(
     }
 
     // Create new account cleanly (moved inside queued init)
-    const email = user.email || `${user.uid}@takadear.app`;
-    const cleanName = (options?.displayName || user.displayName || email.split('@')[0] || 'ব্যবহারকারী')
-      .trim()
-      .slice(0, 80);
-    const refCode = generateRefCode(email, user.uid);
+    const email = resolvedEmail;
+    const cleanName = deriveDisplayName(email, fallbackName);
+    let refCode = generateRefCode(email, user.uid);
+    let shouldCreateRefCodeDoc = false;
+    let refCodeVerified = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const suffix = Math.random()
+        .toString(36)
+        .slice(2, 6)
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, 'X')
+        .padEnd(4, 'X');
+      const candidate =
+        attempt === 0
+          ? refCode
+          : `${refCode.slice(0, 18)}${suffix}`.slice(0, 24);
+      try {
+        const existingCodeSnap = await getDocFromServer(doc(db, 'referralCodes', candidate));
+        if (!existingCodeSnap.exists()) {
+          refCode = candidate;
+          shouldCreateRefCodeDoc = true;
+          refCodeVerified = true;
+          break;
+        }
+        const existingOwner = (existingCodeSnap.data() as { ownerId?: string })?.ownerId;
+        if (existingOwner === user.uid) {
+          refCode = candidate;
+          shouldCreateRefCodeDoc = false;
+          refCodeVerified = true;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+    if (!refCodeVerified) {
+      throw new Error('রেফারেল কোড যাচাই করতে সমস্যা হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন');
+    }
+
     const enteredRef = options?.referredBy?.trim().toUpperCase() || null;
 
     let validReferrerUid: string | null = null;
     if (enteredRef && enteredRef !== refCode) {
       try {
-        const refSnap = await getDoc(doc(db, 'referralCodes', enteredRef));
+        const refSnap = await getDocFromServer(doc(db, 'referralCodes', enteredRef));
         if (refSnap.exists()) {
           const data = refSnap.data() as { ownerId?: string };
           if (data.ownerId && data.ownerId !== user.uid) {
@@ -325,6 +540,16 @@ export async function ensureUserAccount(
       } catch {
         // Invalid or unreadable ref code ignored safely
       }
+    }
+
+    let existingVault: UserPrivateVault | null = null;
+    try {
+      const existingVaultSnap = await getDocFromServer(vaultRef);
+      if (existingVaultSnap.exists()) {
+        existingVault = existingVaultSnap.data() as UserPrivateVault;
+      }
+    } catch {
+      existingVault = null;
     }
 
     const encEmail = await encryptFieldOnServer('email', email);
@@ -351,7 +576,7 @@ export async function ensureUserAccount(
       updatedAt: serverTimestamp(),
     };
 
-    const vaultPayload: UserPrivateVault = {
+    const vaultPayload: UserPrivateVault = existingVault || {
       userId: user.uid,
       emailMasked: encEmail.masked || maskEmail(email),
       encryptedEmail: encEmail.encrypted,
@@ -360,20 +585,34 @@ export async function ensureUserAccount(
     };
 
     let refCfg: ReferralSettingsConfig | null = null;
+    let shouldCreateReferralClaim = false;
     if (validReferrerUid && enteredRef) {
-      refCfg = await fetchReferralSettings();
+      try {
+        const refSettingsSnap = await getDocFromServer(doc(db, 'taskSettings', 'referral_settings'));
+        refCfg = refSettingsSnap.exists()
+          ? parseReferralSettings(refSettingsSnap.data() as Record<string, unknown>)
+          : { ...DEFAULT_REFERRAL_SETTINGS };
+        const existingClaimSnap = await getDocFromServer(doc(db, 'referralClaims', user.uid));
+        shouldCreateReferralClaim = !existingClaimSnap.exists();
+      } catch {
+        shouldCreateReferralClaim = false;
+      }
     }
 
     const batch = writeBatch(db);
     batch.set(userRef, accountPayload);
-    batch.set(vaultRef, { ...vaultPayload, updatedAt: serverTimestamp() });
-    batch.set(doc(db, 'referralCodes', refCode), {
-      refCode,
-      ownerId: user.uid,
-      createdAt: serverTimestamp(),
-    });
+    if (!existingVault) {
+      batch.set(vaultRef, { ...vaultPayload, updatedAt: serverTimestamp() });
+    }
+    if (shouldCreateRefCodeDoc) {
+      batch.set(doc(db, 'referralCodes', refCode), {
+        refCode,
+        ownerId: user.uid,
+        createdAt: serverTimestamp(),
+      });
+    }
 
-    if (validReferrerUid && enteredRef && refCfg) {
+    if (validReferrerUid && enteredRef && refCfg && shouldCreateReferralClaim) {
       batch.set(doc(db, 'referralClaims', user.uid), {
         referredUid: user.uid,
         referrerUid: validReferrerUid,
@@ -660,13 +899,11 @@ export async function claimPendingReferrals(uid: string, _account?: UserAccount)
 
 export async function fetchUserActivity(uid: string): Promise<{
   transactions: TransactionRecord[];
-  spins: SpinRecord[];
   withdrawals: WithdrawalRecord[];
 }> {
   try {
-    const [txSnap, spinSnap, wdSnap] = await Promise.all([
+    const [txSnap, wdSnap] = await Promise.all([
       getDocs(query(collection(db, 'users', uid, 'transactions'), where('userId', '==', uid), limit(30))),
-      getDocs(query(collection(db, 'users', uid, 'spins'), where('userId', '==', uid), limit(20))),
       getDocs(query(collection(db, 'withdrawals'), where('userId', '==', uid), limit(30))),
     ]);
 
@@ -689,27 +926,14 @@ export async function fetchUserActivity(uid: string): Promise<{
       })
       .sort((a, b) => b.createdAtMs - a.createdAtMs);
 
-    const spins: SpinRecord[] = spinSnap.docs
-      .map((d) => {
-        const data = d.data();
-        const ms = timestampToMs(data.createdAt);
-        return {
-          id: d.id,
-          userId: data.userId,
-          amount: Number(data.amount || 0),
-          prizeIndex: Number(data.prizeIndex || 0),
-          receiptId: String(data.receiptId || ''),
-          receiptSignature: String(data.receiptSignature || ''),
-          createdAtMs: ms,
-          dateLabel: formatBnDate(new Date(ms)),
-        };
-      })
-      .sort((a, b) => b.createdAtMs - a.createdAtMs);
-
     const withdrawals: WithdrawalRecord[] = wdSnap.docs
       .map((d) => {
         const data = d.data();
         const ms = timestampToMs(data.createdAt);
+        const amount = Number(data.amount || 0);
+        const fee = data.fee !== undefined ? Number(data.fee || 0) : 0;
+        const totalAmount =
+          data.totalAmount !== undefined ? Number(data.totalAmount || amount) : roundMoney(amount + fee);
         return {
           id: d.id,
           userId: data.userId,
@@ -717,7 +941,9 @@ export async function fetchUserActivity(uid: string): Promise<{
           method: data.method as PaymentMethod,
           maskedNumber: String(data.maskedNumber || '***'),
           encryptedAccount: String(data.encryptedAccount || ''),
-          amount: Number(data.amount || 0),
+          amount,
+          fee,
+          totalAmount,
           status: data.status as WithdrawalStatus,
           receiptId: String(data.receiptId || ''),
           receiptSignature: String(data.receiptSignature || ''),
@@ -727,7 +953,7 @@ export async function fetchUserActivity(uid: string): Promise<{
       })
       .sort((a, b) => b.createdAtMs - a.createdAtMs);
 
-    return { transactions, spins, withdrawals };
+    return { transactions, withdrawals };
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, `users/${uid}/activity`);
   }
@@ -736,19 +962,32 @@ export async function fetchUserActivity(uid: string): Promise<{
 export async function performDailyCheckin(uid: string, account: UserAccount): Promise<number> {
   return enqueueWalletOp(uid, async () => {
     const userRef = doc(db, 'users', uid);
-    let freshAccount = account;
-    try {
-      const freshSnap = await getUserDocPreferServer(userRef);
-      if (freshSnap.exists()) {
-        freshAccount = freshSnap.data() as UserAccount;
-      }
-    } catch {
-      // Fall back to passed snapshot if server check is transiently unreachable
-    }
-
     const today = todayKey();
     const yest = yesterdayKey();
-    const preview = calculateNextStreak(freshAccount.streakLast, freshAccount.streakCount, today, yest);
+    const fallbackEmail = auth.currentUser?.email || `${uid}@takadear.app`;
+    let freshAccount = account;
+    try {
+      const repaired = await repairLegacyUserDocIfNeeded(
+        userRef,
+        uid,
+        fallbackEmail,
+        today,
+        account.name || auth.currentUser?.displayName || undefined
+      );
+      if (repaired) {
+        freshAccount = repaired;
+      }
+    } catch (repairErr) {
+      if (isPermissionDeniedError(repairErr)) {
+        handleFirestoreError(repairErr, OperationType.UPDATE, `users/${uid}`);
+      }
+    }
+    const preview = calculateNextStreak(
+      freshAccount.streakLast ?? null,
+      Math.trunc(Number(freshAccount.streakCount || 0)),
+      today,
+      yest
+    );
     if (preview.alreadyChecked) {
       throw new Error('আজকের চেক-ইন ইতিমধ্যেই সম্পন্ন হয়েছে');
     }
@@ -760,15 +999,22 @@ export async function performDailyCheckin(uid: string, account: UserAccount): Pr
     });
 
     const txRef = doc(db, 'users', uid, 'transactions', makeDocId('tx'));
+    let lastCheckedRaw: Record<string, unknown> | null = null;
 
     try {
       const txRes = await runTransaction(db, async (tx) => {
         const snap = await tx.get(userRef);
         if (!snap.exists()) throw new Error('ব্যবহারকারী পাওয়া যায়নি');
-        const u = snap.data() as UserAccount;
+        lastCheckedRaw = snap.data() as Record<string, unknown>;
+        const u = lastCheckedRaw as unknown as UserAccount;
         if (u.suspended) throw new Error('আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে');
 
-        const result = calculateNextStreak(u.streakLast, u.streakCount, today, yest);
+        const result = calculateNextStreak(
+          u.streakLast ?? null,
+          Math.trunc(Number(u.streakCount || 0)),
+          today,
+          yest
+        );
         if (result.alreadyChecked) {
           throw new Error('আজকের চেক-ইন ইতিমধ্যেই সম্পন্ন হয়েছে');
         }
@@ -777,14 +1023,19 @@ export async function performDailyCheckin(uid: string, account: UserAccount): Pr
         }
 
         const base = normalizeDailyCounters(u, today);
-        const nextWallet = computeNextWalletState(base.balance, base.totalEarned, result.reward);
+        const nextWallet = computeRewardCreditState(
+          Number(base.balance || 0),
+          Number(base.totalEarned || 0),
+          Number(base.dailyTodayEarn || 0),
+          result.reward
+        );
 
         tx.update(userRef, {
           streakLast: today,
-          streakCount: result.nextCount,
+          streakCount: Math.trunc(result.nextCount),
           balance: nextWallet.balance,
           totalEarned: nextWallet.totalEarned,
-          dailyTodayEarn: addMoney(base.dailyTodayEarn || 0, result.reward),
+          dailyTodayEarn: nextWallet.dailyTodayEarn,
           dailyDate: today,
           ...(u.dailyDate !== today
             ? {
@@ -832,212 +1083,11 @@ export async function performDailyCheckin(uid: string, account: UserAccount): Pr
       ) {
         throw err;
       }
-      handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
-    }
-  });
-}
-
-export async function completeEarningTask(
-  uid: string,
-  _account: UserAccount,
-  task: TaskConfig
-): Promise<number> {
-  if (task.id === 'invite' || !CONTROLLABLE_TASK_IDS.includes(task.id as ControllableTaskId)) {
-    throw new Error('অবৈধ টাস্ক');
-  }
-  const taskId = task.id as ControllableTaskId;
-
-  return enqueueWalletOp(uid, async () => {
-    const today = todayKey();
-    const settingsRef = doc(db, 'taskSettings', 'regular_tasks');
-
-    let settingsSnap;
-    try {
-      settingsSnap = await getDoc(settingsRef);
-    } catch {
-      settingsSnap = null;
-    }
-    const cfg = parseRegularTaskSettings(
-      settingsSnap?.exists() ? (settingsSnap.data() as Record<string, unknown>) : null
-    )[taskId];
-    if (!cfg.enabled) {
-      throw new Error('এই টাস্কটি বর্তমানে বন্ধ আছে — শীঘ্রই আসছে');
-    }
-    const expectedReward = roundMoney(cfg.reward);
-
-    const receipt = await signRewardReceipt({
-      action: 'task',
-      amount: expectedReward,
-      taskId,
-    });
-
-    const userRef = doc(db, 'users', uid);
-    const txRef = doc(db, 'users', uid, 'transactions', makeDocId('tx'));
-
-    try {
-      const txRes = await runTransaction(db, async (tx) => {
-        const [snap, liveSettingsSnap] = await Promise.all([
-          tx.get(userRef),
-          tx.get(settingsRef),
-        ]);
-        if (!snap.exists()) throw new Error('ব্যবহারকারী পাওয়া যায়নি');
-        const u = snap.data() as UserAccount;
-        if (u.suspended) throw new Error('আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে');
-
-        const liveCfg = parseRegularTaskSettings(
-          liveSettingsSnap?.exists() ? (liveSettingsSnap.data() as Record<string, unknown>) : null
-        )[taskId];
-        if (!liveCfg.enabled) {
-          throw new Error('এই টাস্কটি বর্তমানে বন্ধ আছে — শীঘ্রই আসছে');
-        }
-        const activeLimit = liveCfg.limit;
-        const activeReward = roundMoney(liveCfg.reward);
-        if (activeReward !== expectedReward || activeReward < 0.05) {
-          throw new Error('টাস্কের পুরস্কার আপডেট হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন');
-        }
-
-        const base = normalizeDailyCounters(u, today);
-        const doneCount = Number(base.dailyTasks[taskId] || 0) + 1;
-        if (doneCount > activeLimit) {
-          throw new Error('আজকের এই টাস্কের লিমিট শেষ হয়েছে');
-        }
-
-        const nextWallet = computeNextWalletState(base.balance, base.totalEarned, activeReward);
-
-        tx.update(userRef, {
-          dailyDate: today,
-          dailySpins: Number(base.dailySpins || 0),
-          dailyTasks: { ...base.dailyTasks, [task.id]: doneCount },
-          dailyAds: task.id === 'ad' ? Number(base.dailyAds || 0) + 1 : Number(base.dailyAds || 0),
-          balance: nextWallet.balance,
-          totalEarned: nextWallet.totalEarned,
-          dailyTodayEarn: addMoney(base.dailyTodayEarn || 0, activeReward),
-          updatedAt: serverTimestamp(),
+      if (isPermissionDeniedError(err)) {
+        logUserRuleDiagnostic('performDailyCheckin', uid, lastCheckedRaw, {
+          reward: preview.reward,
+          today,
         });
-        tx.set(txRef, {
-          userId: uid,
-          type: 'in',
-          amount: activeReward,
-          title: task.title,
-          icon: task.icon,
-          receiptId: receipt.receiptId,
-          receiptSignature: receipt.receiptSignature,
-          createdAt: serverTimestamp(),
-        });
-        return {
-          awarded: activeReward,
-          balance: nextWallet.balance,
-          userName: u.name,
-          refCode: u.refCode,
-        };
-      });
-      void notifyTelegramEvent({
-        type: 'task',
-        userName: txRes.userName,
-        refCode: txRes.refCode,
-        taskId,
-        taskTitle: task.title,
-        amount: txRes.awarded,
-        balance: txRes.balance,
-      });
-      return txRes.awarded;
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        (err.message.includes('লিমিট শেষ') ||
-          err.message.includes('বন্ধ আছে') ||
-          err.message.includes('পুরস্কার আপডেট') ||
-          err.message.includes('সাসপেন্ড') ||
-          err.message.includes('পাওয়া যায়নি'))
-      ) {
-        throw err;
-      }
-      handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
-    }
-  });
-}
-
-export async function recordSpinWin(
-  uid: string,
-  _account: UserAccount,
-  prizeIndex: number,
-  _amount: number
-): Promise<void> {
-  if (!Number.isInteger(prizeIndex) || prizeIndex < 0 || prizeIndex >= WHEEL_SEGMENTS.length) {
-    throw new Error('অবৈধ স্পিন পুরস্কার');
-  }
-  return enqueueWalletOp(uid, async () => {
-    const exactAmount = WHEEL_SEGMENTS[prizeIndex].v;
-    const today = todayKey();
-    const receipt = await signRewardReceipt({
-      action: 'spin',
-      amount: exactAmount,
-      prizeIndex,
-    });
-
-    const userRef = doc(db, 'users', uid);
-    const spinRef = doc(db, 'users', uid, 'spins', makeDocId('sp'));
-    const txRef = doc(db, 'users', uid, 'transactions', makeDocId('tx'));
-
-    try {
-      const txRes = await runTransaction(db, async (tx) => {
-        const snap = await tx.get(userRef);
-        if (!snap.exists()) throw new Error('ব্যবহারকারী পাওয়া যায়নি');
-        const u = snap.data() as UserAccount;
-        if (u.suspended) throw new Error('আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে');
-
-        const base = normalizeDailyCounters(u, today);
-        if (Number(base.dailySpins || 0) >= SPIN_LIMIT) {
-          throw new Error('আজকের স্পিন সীমা শেষ হয়ে গেছে');
-        }
-
-        const nextWallet = computeNextWalletState(base.balance, base.totalEarned, exactAmount);
-
-        tx.update(userRef, {
-          dailyDate: today,
-          dailySpins: Number(base.dailySpins || 0) + 1,
-          dailyAds: Number(base.dailyAds || 0),
-          dailyTasks: base.dailyTasks,
-          balance: nextWallet.balance,
-          totalEarned: nextWallet.totalEarned,
-          dailyTodayEarn: addMoney(base.dailyTodayEarn || 0, exactAmount),
-          updatedAt: serverTimestamp(),
-        });
-        tx.set(spinRef, {
-          userId: uid,
-          amount: exactAmount,
-          prizeIndex,
-          receiptId: receipt.receiptId,
-          receiptSignature: receipt.receiptSignature,
-          createdAt: serverTimestamp(),
-        });
-        tx.set(txRef, {
-          userId: uid,
-          type: 'in',
-          amount: exactAmount,
-          title: 'লাকি স্পিন',
-          icon: '🎡',
-          receiptId: receipt.receiptId,
-          receiptSignature: receipt.receiptSignature,
-          createdAt: serverTimestamp(),
-        });
-        return {
-          balance: nextWallet.balance,
-          userName: u.name,
-          refCode: u.refCode,
-        };
-      });
-      void notifyTelegramEvent({
-        type: 'spin',
-        userName: txRes.userName,
-        refCode: txRes.refCode,
-        prizeIndex,
-        amount: exactAmount,
-        balance: txRes.balance,
-      });
-    } catch (err) {
-      if (err instanceof Error && (err.message.includes('স্পিন সীমা') || err.message.includes('সাসপেন্ড') || err.message.includes('পাওয়া যায়নি'))) {
-        throw err;
       }
       handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
     }
@@ -1052,8 +1102,13 @@ export async function submitEncryptedWithdrawal(
   amount: number
 ): Promise<WithdrawalRecord> {
   return enqueueWalletOp(uid, async () => {
-    const cleanAmount = roundMoney(amount);
-    const preErr = validateWithdrawal(accountNumber, cleanAmount, account.balance);
+    if (method !== 'bKash') {
+      throw new Error('বর্তমানে শুধুমাত্র বিকাশ (bKash) এর মাধ্যমে উত্তোলন করা যাবে');
+    }
+
+    const liveWithdrawalSettings = await fetchWithdrawalSettings();
+    const { payoutAmount, fee, totalDeducted } = calculateWithdrawalTotal(amount, liveWithdrawalSettings);
+    const preErr = validateWithdrawal(accountNumber, payoutAmount, account.balance, fee);
     if (preErr) {
       throw new Error(preErr);
     }
@@ -1061,8 +1116,8 @@ export async function submitEncryptedWithdrawal(
     const encryptedRes = await encryptFieldOnServer('wallet_number', accountNumber);
     const receipt = await signRewardReceipt({
       action: 'withdrawal',
-      amount: cleanAmount,
-      method,
+      amount: totalDeducted,
+      method: 'bKash',
     });
 
     const withdrawalId = makeDocId('wd');
@@ -1081,12 +1136,12 @@ export async function submitEncryptedWithdrawal(
         const u = snap.data() as UserAccount;
         if (u.suspended) throw new Error('আপনার অ্যাকাউন্ট সাসপেন্ড করা হয়েছে');
 
-        const serverErr = validateWithdrawal(accountNumber, cleanAmount, u.balance);
+        const serverErr = validateWithdrawal(accountNumber, payoutAmount, u.balance, fee);
         if (serverErr) {
           throw new Error(serverErr);
         }
 
-        const nextWallet = computeNextWalletState(u.balance, u.totalEarned, -cleanAmount);
+        const nextWallet = computeNextWalletState(u.balance, u.totalEarned, -totalDeducted);
         resolvedName = u.name;
         resolvedRefCode = u.refCode;
         resolvedBalance = nextWallet.balance;
@@ -1098,10 +1153,12 @@ export async function submitEncryptedWithdrawal(
         tx.set(wdRef, {
           userId: uid,
           userName: u.name,
-          method,
+          method: 'bKash',
           maskedNumber: encryptedRes.masked,
           encryptedAccount: encryptedRes.encrypted,
-          amount: cleanAmount,
+          amount: payoutAmount,
+          fee,
+          totalAmount: totalDeducted,
           status: 'প্রসেসিং',
           receiptId: receipt.receiptId,
           receiptSignature: receipt.receiptSignature,
@@ -1111,8 +1168,11 @@ export async function submitEncryptedWithdrawal(
         tx.set(txRef, {
           userId: uid,
           type: 'out',
-          amount: cleanAmount,
-          title: `${method} উত্তোলন (${encryptedRes.masked})`,
+          amount: totalDeducted,
+          title:
+            fee > 0
+              ? `bKash উত্তোলন (৳${fmtAmount(payoutAmount)} + ফি ৳${fmtAmount(fee)})`
+              : `bKash উত্তোলন (${encryptedRes.masked})`,
           icon: '🏦',
           receiptId: receipt.receiptId,
           receiptSignature: receipt.receiptSignature,
@@ -1124,6 +1184,7 @@ export async function submitEncryptedWithdrawal(
         err instanceof Error &&
         (err.message.includes('ব্যালেন্স') ||
           err.message.includes('উত্তোলন') ||
+          err.message.includes('বিকাশ') ||
           err.message.includes('মোবাইল') ||
           err.message.includes('সাসপেন্ড') ||
           err.message.includes('পাওয়া যায়নি'))
@@ -1137,9 +1198,9 @@ export async function submitEncryptedWithdrawal(
       type: 'withdrawal_request',
       userName: resolvedName,
       refCode: resolvedRefCode,
-      method,
+      method: 'bKash',
       maskedNumber: encryptedRes.masked,
-      amount: cleanAmount,
+      amount: payoutAmount,
       balance: resolvedBalance,
       receiptId: receipt.receiptId,
     });
@@ -1148,10 +1209,12 @@ export async function submitEncryptedWithdrawal(
       id: withdrawalId,
       userId: uid,
       userName: resolvedName,
-      method,
+      method: 'bKash',
       maskedNumber: encryptedRes.masked,
       encryptedAccount: encryptedRes.encrypted,
-      amount: cleanAmount,
+      amount: payoutAmount,
+      fee,
+      totalAmount: totalDeducted,
       status: 'প্রসেসিং',
       receiptId: receipt.receiptId,
       receiptSignature: receipt.receiptSignature,
@@ -1244,100 +1307,6 @@ export async function adminSaveAccountSellSettings(
   }
 }
 
-// ===== Regular Earning Tasks Admin Controls =====
-function cloneDefaultRegularTaskSettings(): RegularTaskSettingsMap {
-  return {
-    ad: { ...DEFAULT_REGULAR_TASK_SETTINGS.ad },
-    article: { ...DEFAULT_REGULAR_TASK_SETTINGS.article },
-    quiz: { ...DEFAULT_REGULAR_TASK_SETTINGS.quiz },
-    survey: { ...DEFAULT_REGULAR_TASK_SETTINGS.survey },
-    app: { ...DEFAULT_REGULAR_TASK_SETTINGS.app },
-  };
-}
-
-function parseRegularTaskSettings(d?: Record<string, unknown> | null): RegularTaskSettingsMap {
-  const result = cloneDefaultRegularTaskSettings();
-  if (!d) return result;
-  for (const id of CONTROLLABLE_TASK_IDS) {
-    const def = DEFAULT_REGULAR_TASK_SETTINGS[id];
-    const rawEnabled = d[`${id}Enabled`];
-    const rawLimit = Number(d[`${id}Limit`]);
-    const rawReward = Number(d[`${id}Reward`]);
-    const rawTimer = Number(d[`${id}Timer`]);
-    const rawUrl = d[`${id}Url`];
-
-    result[id] = {
-      enabled: typeof rawEnabled === 'boolean' ? rawEnabled : def.enabled,
-      limit:
-        Number.isInteger(rawLimit) && rawLimit >= 0 && rawLimit <= 200
-          ? rawLimit
-          : def.limit,
-      reward:
-        Number.isFinite(rawReward) && rawReward >= 0.05 && rawReward <= 500
-          ? roundMoney(rawReward)
-          : def.reward,
-      timer:
-        Number.isInteger(rawTimer) && rawTimer >= 0 && rawTimer <= 300
-          ? rawTimer
-          : def.timer,
-      url: typeof rawUrl === 'string' ? rawUrl.trim().slice(0, 500) : def.url,
-    };
-  }
-  return result;
-}
-
-export async function fetchRegularTaskSettings(): Promise<RegularTaskSettingsMap> {
-  try {
-    const snap = await getDoc(doc(db, 'taskSettings', 'regular_tasks'));
-    if (!snap.exists()) {
-      return cloneDefaultRegularTaskSettings();
-    }
-    return parseRegularTaskSettings(snap.data() as Record<string, unknown>);
-  } catch {
-    return cloneDefaultRegularTaskSettings();
-  }
-}
-
-export function subscribeRegularTaskSettings(
-  onSettings: (settings: RegularTaskSettingsMap) => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
-  return onSnapshot(
-    doc(db, 'taskSettings', 'regular_tasks'),
-    (snap) => {
-      if (!snap.exists()) {
-        onSettings(cloneDefaultRegularTaskSettings());
-      } else {
-        onSettings(parseRegularTaskSettings(snap.data() as Record<string, unknown>));
-      }
-    },
-    (err) => {
-      if (onError) onError(err);
-    }
-  );
-}
-
-export async function adminSaveRegularTaskSettings(
-  settings: RegularTaskSettingsMap
-): Promise<void> {
-  const payload: Record<string, unknown> = {
-    updatedAt: serverTimestamp(),
-  };
-  for (const id of CONTROLLABLE_TASK_IDS as readonly ControllableTaskId[]) {
-    const item = settings[id];
-    payload[`${id}Enabled`] = Boolean(item.enabled);
-    payload[`${id}Limit`] = Math.round(Number(item.limit));
-    payload[`${id}Reward`] = roundMoney(Number(item.reward));
-    payload[`${id}Timer`] = Math.round(Number(item.timer));
-    payload[`${id}Url`] = (item.url || '').trim().slice(0, 500);
-  }
-  try {
-    await setDoc(doc(db, 'taskSettings', 'regular_tasks'), payload);
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, 'taskSettings/regular_tasks');
-  }
-}
-
 // ===== Referral Settings & Conditions =====
 function parseReferralSettings(d?: Record<string, unknown> | null): ReferralSettingsConfig {
   if (!d) return { ...DEFAULT_REFERRAL_SETTINGS };
@@ -1408,6 +1377,66 @@ export async function adminSaveReferralSettings(
     });
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, 'taskSettings/referral_settings');
+  }
+}
+
+// ===== Withdrawal Fee Settings =====
+function parseWithdrawalSettings(d?: Record<string, unknown> | null): WithdrawalSettingsConfig {
+  if (!d) return { ...DEFAULT_WITHDRAWAL_SETTINGS };
+  const feeType = d.feeType === 'percent' ? 'percent' : 'fixed';
+  const rawVal = Number(d.feeValue);
+  const maxVal = feeType === 'percent' ? 50 : 1000;
+  return {
+    feeType,
+    feeValue:
+      Number.isFinite(rawVal) && rawVal >= 0 && rawVal <= maxVal
+        ? roundMoney(rawVal)
+        : DEFAULT_WITHDRAWAL_SETTINGS.feeValue,
+  };
+}
+
+export async function fetchWithdrawalSettings(): Promise<WithdrawalSettingsConfig> {
+  try {
+    const snap = await getDoc(doc(db, 'taskSettings', 'withdrawal_settings'));
+    if (!snap.exists()) {
+      return { ...DEFAULT_WITHDRAWAL_SETTINGS };
+    }
+    return parseWithdrawalSettings(snap.data() as Record<string, unknown>);
+  } catch {
+    return { ...DEFAULT_WITHDRAWAL_SETTINGS };
+  }
+}
+
+export function subscribeWithdrawalSettings(
+  onSettings: (settings: WithdrawalSettingsConfig) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, 'taskSettings', 'withdrawal_settings'),
+    (snap) => {
+      if (!snap.exists()) {
+        onSettings({ ...DEFAULT_WITHDRAWAL_SETTINGS });
+      } else {
+        onSettings(parseWithdrawalSettings(snap.data() as Record<string, unknown>));
+      }
+    },
+    (err) => {
+      if (onError) onError(err);
+    }
+  );
+}
+
+export async function adminSaveWithdrawalSettings(
+  settings: WithdrawalSettingsConfig
+): Promise<void> {
+  try {
+    await setDoc(doc(db, 'taskSettings', 'withdrawal_settings'), {
+      feeType: settings.feeType === 'percent' ? 'percent' : 'fixed',
+      feeValue: roundMoney(Math.max(0, Number(settings.feeValue || 0))),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'taskSettings/withdrawal_settings');
   }
 }
 
@@ -1528,20 +1557,20 @@ export interface AdminDashboardData {
   recentTransactions: Array<TransactionRecord & { userName: string }>;
   submissions: AccountSubmissionRecord[];
   accountSellSettings: AccountSellSettingsConfig;
-  regularTaskSettings: RegularTaskSettingsMap;
   referralSettings: ReferralSettingsConfig;
+  withdrawalSettings: WithdrawalSettingsConfig;
 }
 
 export async function fetchAdminDashboardData(): Promise<AdminDashboardData> {
   try {
-    const [usersSnap, wdSnap, subSnap, accountSellSettings, regularTaskSettings, referralSettings] =
+    const [usersSnap, wdSnap, subSnap, accountSellSettings, referralSettings, withdrawalSettings] =
       await Promise.all([
         getDocs(query(collection(db, 'users'), limit(300))),
         getDocs(query(collection(db, 'withdrawals'), limit(150))),
         getDocs(query(collection(db, 'accountSubmissions'), limit(150))),
         fetchAccountSellSettings(),
-        fetchRegularTaskSettings(),
         fetchReferralSettings(),
+        fetchWithdrawalSettings(),
       ]);
 
     const rawUsers = usersSnap.docs.map((d) => d.data() as UserAccount);
@@ -1581,6 +1610,10 @@ export async function fetchAdminDashboardData(): Promise<AdminDashboardData> {
       .map((d) => {
         const data = d.data();
         const ms = timestampToMs(data.createdAt);
+        const amount = Number(data.amount || 0);
+        const fee = data.fee !== undefined ? Number(data.fee || 0) : 0;
+        const totalAmount =
+          data.totalAmount !== undefined ? Number(data.totalAmount || amount) : roundMoney(amount + fee);
         return {
           id: d.id,
           userId: data.userId,
@@ -1588,7 +1621,9 @@ export async function fetchAdminDashboardData(): Promise<AdminDashboardData> {
           method: data.method as PaymentMethod,
           maskedNumber: String(data.maskedNumber || '***'),
           encryptedAccount: String(data.encryptedAccount || ''),
-          amount: Number(data.amount || 0),
+          amount,
+          fee,
+          totalAmount,
           status: data.status as WithdrawalStatus,
           receiptId: String(data.receiptId || ''),
           receiptSignature: String(data.receiptSignature || ''),
@@ -1654,8 +1689,8 @@ export async function fetchAdminDashboardData(): Promise<AdminDashboardData> {
       recentTransactions,
       submissions,
       accountSellSettings,
-      regularTaskSettings,
       referralSettings,
+      withdrawalSettings,
     };
   } catch (err) {
     handleFirestoreError(err, OperationType.LIST, 'admin/dashboard');
@@ -1735,11 +1770,14 @@ export async function adminUpdateWithdrawalStatus(
 ): Promise<void> {
   const wdRef = doc(db, 'withdrawals', withdrawal.id);
   const userRef = doc(db, 'users', withdrawal.userId);
+  const expectedRefund = roundMoney(
+    Number(withdrawal.totalAmount ?? addMoney(withdrawal.amount, withdrawal.fee || 0))
+  );
   const refundReceipt =
     status === 'বাতিল'
       ? await signRewardReceipt({
           action: 'admin_adjust',
-          amount: roundMoney(withdrawal.amount),
+          amount: expectedRefund,
         })
       : null;
 
@@ -1747,7 +1785,12 @@ export async function adminUpdateWithdrawalStatus(
     await runTransaction(db, async (tx) => {
       const wdSnap = await tx.get(wdRef);
       if (!wdSnap.exists()) throw new Error('উত্তোলন অনুরোধ পাওয়া যায়নি');
-      const currentWd = wdSnap.data() as { status?: string; amount?: number; method?: string };
+      const currentWd = wdSnap.data() as {
+        status?: string;
+        amount?: number;
+        totalAmount?: number;
+        method?: string;
+      };
       if (currentWd.status !== 'প্রসেসিং') {
         throw new Error('এই উত্তোলন অনুরোধটি ইতিমধ্যেই প্রসেস করা হয়েছে');
       }
@@ -1760,7 +1803,9 @@ export async function adminUpdateWithdrawalStatus(
         return;
       }
 
-      const refundAmount = roundMoney(Number(currentWd.amount || withdrawal.amount));
+      const refundAmount = roundMoney(
+        Number(currentWd.totalAmount ?? currentWd.amount ?? expectedRefund)
+      );
       const userSnap = await tx.get(userRef);
 
       tx.update(wdRef, {

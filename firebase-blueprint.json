@@ -81,6 +81,14 @@
           "type": "string",
           "format": "date-time"
         },
+        "lastSpinAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastBigSpinAt": {
+          "type": "string",
+          "format": "date-time"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
@@ -255,7 +263,7 @@
     },
     "WithdrawalRequest": {
       "title": "WithdrawalRequest",
-      "description": "Encrypted payout request to bKash, Nagad, or Rocket.",
+      "description": "Encrypted payout request to bKash (with legacy Nagad/Rocket support).",
       "type": "object",
       "properties": {
         "userId": {
@@ -284,6 +292,12 @@
           "maxLength": 2048
         },
         "amount": {
+          "type": "number"
+        },
+        "fee": {
+          "type": "number"
+        },
+        "totalAmount": {
           "type": "number"
         },
         "status": {
@@ -525,6 +539,17 @@
       },
       "required": ["referrerBonus", "friendBonus", "minTasks", "updatedAt"]
     },
+    "WithdrawalSettings": {
+      "title": "WithdrawalSettings",
+      "description": "Admin-controlled bKash withdrawal fee configuration (fixed BDT or percentage).",
+      "type": "object",
+      "properties": {
+        "feeType": { "type": "string", "enum": ["fixed", "percent"] },
+        "feeValue": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["feeType", "feeValue", "updatedAt"]
+    },
     "AccountSubmission": {
       "title": "AccountSubmission",
       "description": "Pending, approved, or rejected Gmail/Facebook account sell submissions with AES-256-GCM encrypted credentials.",
@@ -753,7 +778,7 @@
     },
     "/taskSettings/{settingId}": {
       "schema": { "$ref": "#/entities/TaskSellSettings" },
-      "description": "Admin-controlled settings documents: 'account_sell' (TaskSellSettings), 'regular_tasks' (RegularTaskSettings), and 'referral_settings' (ReferralSettings)."
+      "description": "Admin-controlled settings documents: 'account_sell' (TaskSellSettings), 'referral_settings' (ReferralSettings), and 'withdrawal_settings' (WithdrawalSettings)."
     },
     "/accountSubmissions/{submissionId}": {
       "schema": { "$ref": "#/entities/AccountSubmission" },

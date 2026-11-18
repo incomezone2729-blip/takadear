@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addMoney,
-  buildMergedTasks,
+  analyzeLegacyUserAccount,
   calculateNextStreak,
-  calculateRemainingSeconds,
   calculateUserLevel,
+  calculateWithdrawalFee,
+  calculateWithdrawalTotal,
   computeNextWalletState,
-  computeSpinRotation,
+  computeRewardCreditState,
   countCompletedActivities,
   DEFAULT_REFERRAL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
+  DEFAULT_WITHDRAWAL_SETTINGS,
   deriveDisplayName,
   filterAccountSubmissionsByPlatform,
   filterAccountSubmissionsByStatus,
@@ -19,6 +20,7 @@ import {
   filterWithdrawalsByStatus,
   fmtAmount,
   fmtBnReward,
+  formatAppErrorMessage,
   FRIEND_REFERRAL_BONUS,
   fromPaisa,
   generateEasyPassword,
@@ -37,7 +39,6 @@ import {
   sortSupportThreads,
   STREAK_BONUS,
   subtractMoney,
-  TASKS,
   toBn,
   toPaisa,
   validateAccountSubmissionInput,
@@ -46,13 +47,12 @@ import {
   validateConfirmPassword,
   validateEmail,
   validateReferralSettings,
-  validateRegularTaskSettings,
   validateSupportMessageText,
   validateTaskSellSettings,
-  validateTaskUrl,
   validateUserName,
   validateWithdrawal,
-  WHEEL_SEGMENTS,
+  validateWithdrawalSettings,
+  WITHDRAWAL_FEE_PRESETS,
 } from './takadearLogic';
 import {
   decryptSensitiveData,
@@ -60,6 +60,12 @@ import {
   signTransactionPayload,
   verifyTransactionSignature,
 } from '../server/crypto';
+import {
+  getCalibratedNowSec,
+  parseHttpDateMs,
+  TOKEN_CLOCK_LEEWAY_SEC,
+  validateDecodedFirebaseClaims,
+} from '../server/firebaseAuthVerify';
 
 test('Bengali numeral formatting and amount formatting', () => {
   assert.equal(toBn(1250), '১২৫০');
@@ -79,20 +85,9 @@ test('Referral code generation and exclusive admin email checks', () => {
   assert.equal(isAdminEmail('attacker@gmail.com'), false);
 });
 
-test('Spin, regular tasks, signup, and referral reward bounds', () => {
+test('Signup and referral reward bounds', () => {
   assert.equal(SIGNUP_BONUS, 0);
   assert.equal(REFERRAL_BONUS, 2);
-  assert.deepEqual(
-    [...new Set(WHEEL_SEGMENTS.map((s) => s.v))].sort((a, b) => a - b),
-    [0.1, 0.2, 0.5, 1, 1.5, 2]
-  );
-  for (const task of TASKS) {
-    if (task.id === 'invite') {
-      assert.equal(task.reward, 2);
-    } else {
-      assert.equal(task.reward, 0.5);
-    }
-  }
 });
 
 test('Phone, email, and withdrawal validation', () => {
@@ -103,6 +98,41 @@ test('Phone, email, and withdrawal validation', () => {
   assert.equal(validateWithdrawal('01712345678', 100, 150), null);
   assert.notEqual(validateWithdrawal('01712345678', 50, 150), null);
   assert.notEqual(validateWithdrawal('01712345678', 200, 150), null);
+});
+
+test('bKash withdrawal fee calculation, total deduction, and admin fee settings validation', () => {
+  assert.deepEqual(DEFAULT_WITHDRAWAL_SETTINGS, { feeType: 'fixed', feeValue: 0 });
+  assert.deepEqual([...WITHDRAWAL_FEE_PRESETS.fixed], [0, 5, 10, 15, 20, 30]);
+  assert.deepEqual([...WITHDRAWAL_FEE_PRESETS.percent], [0, 1, 2, 5, 10]);
+
+  assert.equal(calculateWithdrawalFee(100, DEFAULT_WITHDRAWAL_SETTINGS), 0);
+  assert.deepEqual(calculateWithdrawalTotal(200, { feeType: 'fixed', feeValue: 15 }), {
+    payoutAmount: 200,
+    fee: 15,
+    totalDeducted: 215,
+  });
+  assert.deepEqual(calculateWithdrawalTotal(250, { feeType: 'percent', feeValue: 2 }), {
+    payoutAmount: 250,
+    fee: 5,
+    totalDeducted: 255,
+  });
+  assert.deepEqual(calculateWithdrawalTotal(101, { feeType: 'percent', feeValue: 2.5 }), {
+    payoutAmount: 101,
+    fee: 2.53,
+    totalDeducted: 103.53,
+  });
+
+  // Fee added to withdrawal amount checks balance against amount + fee
+  assert.equal(validateWithdrawal('01712345678', 100, 110, 10), null);
+  const insufficientErr = validateWithdrawal('01712345678', 100, 105, 10);
+  assert.ok(insufficientErr && insufficientErr.includes('110.00'));
+
+  assert.equal(validateWithdrawalSettings({ feeType: 'fixed', feeValue: 0 }), null);
+  assert.equal(validateWithdrawalSettings({ feeType: 'fixed', feeValue: 1000 }), null);
+  assert.notEqual(validateWithdrawalSettings({ feeType: 'fixed', feeValue: -1 }), null);
+  assert.notEqual(validateWithdrawalSettings({ feeType: 'fixed', feeValue: 1001 }), null);
+  assert.equal(validateWithdrawalSettings({ feeType: 'percent', feeValue: 50 }), null);
+  assert.notEqual(validateWithdrawalSettings({ feeType: 'percent', feeValue: 55 }), null);
 });
 
 test('PII masking utilities hide sensitive middle digits', () => {
@@ -172,11 +202,9 @@ test('Daily check-in streak progressive Day 1-7 rewards, miss reset, and display
   assert.deepEqual(reset.dailyTasks, {});
 });
 
-test('Level and spin wheel rotation math', () => {
+test('User level calculation', () => {
   assert.equal(calculateUserLevel(0), 1);
   assert.equal(calculateUserLevel(250), 2);
-  const rot = computeSpinRotation(0, 3);
-  assert.ok(rot >= 360 * 6);
 });
 
 test('AES-256-GCM encryption roundtrip and tamper rejection', () => {
@@ -403,59 +431,6 @@ test('Wallet balance arithmetic remains exact without floating-point glitches', 
   assert.equal(Object.is(roundMoney(-0), -0), false);
 });
 
-test('Regular task settings validation, URL checks, merging, and timer countdown math', () => {
-  assert.equal(validateTaskUrl(''), null);
-  assert.equal(validateTaskUrl('https://example.com/ad?id=12'), null);
-  assert.notEqual(validateTaskUrl('javascript:alert(1)'), null);
-  assert.notEqual(validateTaskUrl('https://bad url.com'), null);
-  assert.notEqual(validateTaskUrl('https://example.com/' + 'a'.repeat(500)), null);
-
-  assert.equal(validateRegularTaskSettings(DEFAULT_REGULAR_TASK_SETTINGS), null);
-
-  const customized = {
-    ...DEFAULT_REGULAR_TASK_SETTINGS,
-    ad: { enabled: false, limit: 10, reward: 1.25, timer: 45, url: 'https://sponsor.example.com/watch' },
-    article: { enabled: true, limit: 8, reward: 2, timer: 20, url: 'https://blog.example.com/read' },
-  };
-  assert.equal(validateRegularTaskSettings(customized), null);
-
-  const merged = buildMergedTasks(customized);
-  const adTask = merged.find((t) => t.id === 'ad');
-  const articleTask = merged.find((t) => t.id === 'article');
-  const inviteTask = merged.find((t) => t.id === 'invite');
-  assert.ok(adTask && articleTask && inviteTask);
-  assert.equal(adTask.enabled, false);
-  assert.equal(adTask.limit, 10);
-  assert.equal(adTask.reward, 1.25);
-  assert.equal(adTask.timer, 45);
-  assert.equal(adTask.url, 'https://sponsor.example.com/watch');
-  assert.equal(articleTask.enabled, true);
-  assert.equal(articleTask.reward, 2);
-  assert.equal(inviteTask.enabled, true);
-
-  assert.notEqual(
-    validateRegularTaskSettings({
-      ...DEFAULT_REGULAR_TASK_SETTINGS,
-      quiz: { enabled: true, limit: 250, reward: 0.5, timer: 0, url: '' },
-    }),
-    null
-  );
-  assert.notEqual(
-    validateRegularTaskSettings({
-      ...DEFAULT_REGULAR_TASK_SETTINGS,
-      app: { enabled: true, limit: 5, reward: 0.01, timer: 10, url: '' },
-    }),
-    null
-  );
-
-  // Elapsed-time countdown accuracy even when browser throttles background tabs
-  const t0 = 1_700_000_000_000;
-  assert.equal(calculateRemainingSeconds(t0, 30, t0), 30);
-  assert.equal(calculateRemainingSeconds(t0, 30, t0 + 14_200), 16);
-  assert.equal(calculateRemainingSeconds(t0, 30, t0 + 30_000), 0);
-  assert.equal(calculateRemainingSeconds(t0, 30, t0 + 45_000), 0);
-});
-
 test('Referral bonus configuration, condition validation, and qualification counters', () => {
   assert.equal(REFERRAL_BONUS, 2);
   assert.equal(FRIEND_REFERRAL_BONUS, 1);
@@ -475,17 +450,207 @@ test('Referral bonus configuration, condition validation, and qualification coun
     null
   );
 
-  assert.equal(countCompletedActivities({ dailySpins: 0, dailyTasks: {} }), 0);
-  assert.equal(countCompletedActivities({ dailySpins: 2, dailyTasks: { ad: 3, quiz: 1 } }), 6);
+  assert.equal(countCompletedActivities({ streakCount: 0, dailySpins: 0, dailyTasks: {} }), 0);
+  assert.equal(countCompletedActivities({ streakCount: 1, dailySpins: 0, dailyTasks: {} }), 1);
+  assert.equal(countCompletedActivities({ streakCount: 1, dailySpins: 2, dailyTasks: { ad: 3, quiz: 1 } }), 7);
   assert.equal(isReferralQualified(0, 1), false);
   assert.equal(isReferralQualified(1, 1), true);
   assert.equal(isReferralQualified(0, 0), true);
-
-  const mergedWithRef = buildMergedTasks(DEFAULT_REGULAR_TASK_SETTINGS, {
-    ...DEFAULT_REFERRAL_SETTINGS,
-    referrerBonus: 5,
-  });
-  const inviteTask = mergedWithRef.find((t) => t.id === 'invite');
-  assert.ok(inviteTask);
-  assert.equal(inviteTask.reward, 5);
 });
+
+test('Legacy user schema analyzer detects extra legacy fields, missing counters, and role normalization', () => {
+  const validDoc = {
+    uid: '6CMVTWvMxrNybyqG7PeBoQG7bNz2',
+    name: 'Test User',
+    refCode: 'TKAHTBNZ2',
+    referredBy: null,
+    balance: 12.5,
+    totalEarned: 12.5,
+    referrals: 1,
+    refEarned: 2,
+    streakCount: 1,
+    streakLast: '2026-11-14',
+    dailyDate: '2026-11-14',
+    dailySpins: 0,
+    dailyAds: 0,
+    dailyTodayEarn: 0.05,
+    dailyTasks: {},
+    theme: 'dark',
+    role: 'user',
+    createdAt: { seconds: 1700000000, nanoseconds: 0 },
+    updatedAt: { seconds: 1700000000, nanoseconds: 0 },
+  };
+  const cleanPlan = analyzeLegacyUserAccount(
+    validDoc,
+    '6CMVTWvMxrNybyqG7PeBoQG7bNz2',
+    'ahtaskpay@gmail.com',
+    '2026-11-14'
+  );
+  assert.equal(cleanPlan.needsRepair, false);
+  assert.deepEqual(cleanPlan.keysToDelete, []);
+  assert.deepEqual(cleanPlan.patch, {});
+
+  const legacyDoc = {
+    uid: '6CMVTWvMxrNybyqG7PeBoQG7bNz2',
+    name: 'AH Task',
+    email: 'ahtaskpay@gmail.com',
+    refCode: 'TKAHTBNZ2',
+    balance: 50,
+    totalEarned: 50,
+    referrals: 0,
+    refEarned: 0,
+    streakCount: 0,
+    dailyDate: '2026-11-14',
+    dailySpins: 0,
+    dailyAds: 0,
+    theme: 'dark',
+    role: 'admin',
+    suspended: null,
+    lastSpinAt: 'bad-string-ts',
+    lastBigSpinAt: 12345,
+    createdAt: { seconds: 1700000000, nanoseconds: 0 },
+    updatedAt: { seconds: 1700000000, nanoseconds: 0 },
+  };
+  const repairPlan = analyzeLegacyUserAccount(
+    legacyDoc,
+    '6CMVTWvMxrNybyqG7PeBoQG7bNz2',
+    'ahtaskpay@gmail.com',
+    '2026-11-14'
+  );
+  assert.equal(repairPlan.needsRepair, true);
+  assert.deepEqual(repairPlan.keysToDelete, ['email']);
+  assert.equal(repairPlan.patch.dailyTodayEarn, 0);
+  assert.deepEqual(repairPlan.patch.dailyTasks, {});
+  assert.equal(repairPlan.patch.role, 'user');
+  assert.equal(repairPlan.patch.suspended, false);
+  assert.equal(repairPlan.patch.lastSpinAt, null);
+  assert.equal(repairPlan.patch.lastBigSpinAt, null);
+  assert.equal('balance' in repairPlan.patch, false);
+
+  const validWithSpinTs = {
+    ...validDoc,
+    lastSpinAt: { seconds: 1700000100, nanoseconds: 0 },
+    lastBigSpinAt: { seconds: 1700000000, nanoseconds: 0 },
+  };
+  const spinTsPlan = analyzeLegacyUserAccount(
+    validWithSpinTs,
+    '6CMVTWvMxrNybyqG7PeBoQG7bNz2',
+    'ahtaskpay@gmail.com',
+    '2026-11-14'
+  );
+  assert.equal(spinTsPlan.needsRepair, false);
+});
+
+test('computeRewardCreditState handles exact paisa math and preserves >2-decimal legacy deltas', () => {
+  const normal = computeRewardCreditState(10.1, 10.1, 0.2, 0.5);
+  assert.deepEqual(normal, {
+    balance: 10.6,
+    totalEarned: 10.6,
+    dailyTodayEarn: 0.7,
+  });
+
+  // Legacy doc with 3 decimal digits: delta must stay exact (0.5) without rounding the base off
+  const legacy = computeRewardCreditState(12.345, 22.345, 1.005, 0.5);
+  assert.equal(legacy.balance, 12.845);
+  assert.equal(legacy.totalEarned, 22.845);
+  assert.equal(legacy.dailyTodayEarn, 1.505);
+  assert.ok(Math.abs((legacy.balance - 12.345) - 0.5) < 0.0001);
+
+  // IEEE-754 boundary cases (e.g., 0.47 + 2 === 2.4699999999999998 < 2.47) stay within 0.001 rule ULP epsilon
+  for (const [base, reward, expected] of [
+    [0.47, 2, 2.47],
+    [0.36, 1, 1.36],
+    [0.72, 2, 2.72],
+    [0.18, 0.5, 0.68],
+  ] as const) {
+    const res = computeRewardCreditState(base, base, 0, reward);
+    assert.equal(res.balance, expected);
+    assert.equal(res.totalEarned, expected);
+    assert.equal(res.dailyTodayEarn, reward);
+    assert.ok(res.balance <= base + reward + 0.001);
+  }
+
+  assert.throws(() => computeRewardCreditState(10, 10, 0, 0));
+  assert.throws(() => computeRewardCreditState(10, 10, 0, -1));
+  assert.throws(() => computeRewardCreditState(NaN, 10, 0, 0.5));
+});
+
+test('formatAppErrorMessage translates JSON Firestore, network, and token errors cleanly', () => {
+  const fallback = 'কাজ সম্পন্ন করতে সমস্যা হয়েছে';
+  assert.equal(formatAppErrorMessage(new Error(''), fallback), fallback);
+
+  const permissionJson = JSON.stringify({
+    error: 'Missing or insufficient permissions.',
+    operationType: 'write',
+    path: 'users/123',
+  });
+  const formattedPerm = formatAppErrorMessage(new Error(permissionJson), fallback);
+  assert.ok(formattedPerm.includes('অনুমতি বা তথ্য যাচাই ব্যর্থ হয়েছে'));
+  assert.equal(formattedPerm.includes('{'), false);
+
+  const offlineJson = JSON.stringify({ error: 'Failed to get document because the client is offline.' });
+  assert.ok(formatAppErrorMessage(new Error(offlineJson), fallback).includes('ইন্টারনেট সংযোগে'));
+
+  assert.ok(formatAppErrorMessage(new Error('Token expired'), fallback).includes('সেশন মেয়াদোত্তীর্ণ'));
+  assert.ok(formatAppErrorMessage(new Error('Failed to fetch'), fallback).includes('সার্ভার সংযোগ ব্যর্থ'));
+  assert.equal(formatAppErrorMessage(new Error('আজকের লিমিট শেষ!'), fallback), 'আজকের লিমিট শেষ!');
+});
+
+test('Firebase JWT claim validation and Google HTTP Date clock-skew calibration', () => {
+  const serverMs = parseHttpDateMs('Mon, 17 Nov 2026 00:38:56 GMT');
+  assert.ok(serverMs !== null);
+  assert.equal(parseHttpDateMs('invalid-date'), null);
+
+  // Simulate container clock running 56s fast ahead of Google UTC
+  const skewedLocalMs = serverMs + 56_000;
+  const offsetMs = serverMs - skewedLocalMs; // -56_000
+  const calibratedSec = getCalibratedNowSec(skewedLocalMs, offsetMs);
+  assert.equal(calibratedSec, Math.floor(serverMs / 1000));
+
+  const projectId = 'takadear-1e124';
+  const validClaims = {
+    iss: `https://securetoken.google.com/${projectId}`,
+    aud: projectId,
+    sub: 'user-uid-123',
+    iat: calibratedSec - 10,
+    exp: calibratedSec + 3590,
+  };
+  assert.doesNotThrow(() => validateDecodedFirebaseClaims(validClaims, projectId, calibratedSec));
+
+  // Token within leeway window still passes; past leeway fails
+  assert.doesNotThrow(() =>
+    validateDecodedFirebaseClaims(
+      { ...validClaims, exp: calibratedSec - (TOKEN_CLOCK_LEEWAY_SEC - 5) },
+      projectId,
+      calibratedSec
+    )
+  );
+  assert.throws(
+    () =>
+      validateDecodedFirebaseClaims(
+        { ...validClaims, exp: calibratedSec - TOKEN_CLOCK_LEEWAY_SEC },
+        projectId,
+        calibratedSec
+      ),
+    /Token expired/
+  );
+
+  assert.throws(
+    () => validateDecodedFirebaseClaims({ ...validClaims, iat: calibratedSec + 301 }, projectId, calibratedSec),
+    /Invalid token issued-at time/
+  );
+  assert.throws(
+    () => validateDecodedFirebaseClaims({ ...validClaims, iss: 'https://evil.example.com' }, projectId, calibratedSec),
+    /Invalid token issuer/
+  );
+  assert.throws(
+    () => validateDecodedFirebaseClaims({ ...validClaims, aud: 'wrong-project' }, projectId, calibratedSec),
+    /Invalid token audience/
+  );
+  assert.throws(
+    () => validateDecodedFirebaseClaims({ ...validClaims, sub: '' }, projectId, calibratedSec),
+    /Invalid token subject/
+  );
+});
+
+

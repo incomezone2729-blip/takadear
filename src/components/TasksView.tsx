@@ -1,28 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Copy, CheckCircle2, Clock, ExternalLink, Mail, ShieldAlert, XCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Copy, CheckCircle2, Clock, Mail, ShieldAlert, Users, XCircle } from 'lucide-react';
 import type {
   AccountSubmissionRecord,
   UserAccount,
 } from '../services/firestoreService';
 import {
-  buildMergedTasks,
-  calculateRemainingSeconds,
   DEFAULT_REFERRAL_SETTINGS,
-  DEFAULT_REGULAR_TASK_SETTINGS,
   fmtAmount,
   fmtBnReward,
-  QUIZ_DATA,
-  SURVEY_DATA,
   toBn,
   validateAccountSubmissionInput,
   type AccountPlatform,
   type AccountSellSettingsConfig,
-  type ControllableTaskId,
-  type MergedTaskConfig,
-  type QuizQuestion,
   type ReferralSettingsConfig,
-  type RegularTaskSettingsMap,
-  type TaskConfig,
 } from '../utils/takadearLogic';
 import { Modal } from './Modal';
 import { FacebookLogo } from './FacebookLogo';
@@ -30,10 +20,8 @@ import { FacebookLogo } from './FacebookLogo';
 interface TasksViewProps {
   account: UserAccount;
   sellSettings: AccountSellSettingsConfig;
-  regularTaskSettings?: RegularTaskSettingsMap;
   referralSettings?: ReferralSettingsConfig;
   submissions: AccountSubmissionRecord[];
-  onCompleteTask: (task: TaskConfig) => Promise<void>;
   onSubmitAccountSale: (params: {
     platform: AccountPlatform;
     identifier: string;
@@ -44,59 +32,22 @@ interface TasksViewProps {
   onToast: (msg: string, variant?: 'default' | 'ok' | 'err' | 'gold') => void;
 }
 
-type ActiveTaskFlow =
-  | { kind: 'timer'; task: MergedTaskConfig; startedAtMs: number; secondsLeft: number }
-  | { kind: 'visit_confirm'; task: MergedTaskConfig }
-  | { kind: 'quiz'; task: MergedTaskConfig; question: QuizQuestion }
-  | { kind: 'survey'; task: MergedTaskConfig; step: number }
-  | { kind: 'invite'; task: MergedTaskConfig }
-  | { kind: 'wrong'; correctAnswer: string }
-  | null;
-
 export const TasksView: React.FC<TasksViewProps> = ({
   account,
   sellSettings,
-  regularTaskSettings = DEFAULT_REGULAR_TASK_SETTINGS,
   referralSettings = DEFAULT_REFERRAL_SETTINGS,
   submissions,
-  onCompleteTask,
   onSubmitAccountSale,
   onToast,
 }) => {
-  const [flow, setFlow] = useState<ActiveTaskFlow>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   const [sellModal, setSellModal] = useState<AccountPlatform | null>(null);
   const [sellIdentifier, setSellIdentifier] = useState('');
   const [sellPassword, setSellPassword] = useState('');
   const [sellNote, setSellNote] = useState('');
   const [sellError, setSellError] = useState<string | null>(null);
-
-  const onCompleteTaskRef = useRef(onCompleteTask);
-  onCompleteTaskRef.current = onCompleteTask;
-  const completedTimerKeyRef = useRef<string | null>(null);
-
-  const activeTimerTask = flow?.kind === 'timer' ? flow.task : null;
-  const activeTimerStart = flow?.kind === 'timer' ? flow.startedAtMs : 0;
-
-  useEffect(() => {
-    if (!flow) return;
-    if (
-      flow.kind === 'timer' ||
-      flow.kind === 'visit_confirm' ||
-      flow.kind === 'quiz' ||
-      flow.kind === 'survey'
-    ) {
-      const id = flow.task.id;
-      if (id !== 'invite') {
-        const cfg = regularTaskSettings[id as ControllableTaskId];
-        if (cfg && !cfg.enabled) {
-          setFlow(null);
-          onToast('এই কাজটি বর্তমানে বন্ধ — শীঘ্রই আসছে', 'gold');
-        }
-      }
-    }
-  }, [flow, regularTaskSettings, onToast]);
 
   useEffect(() => {
     if (!sellModal) return;
@@ -107,39 +58,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
       onToast('এই কাজটি বর্তমানে বন্ধ — শীঘ্রই আসছে', 'gold');
     }
   }, [sellModal, sellSettings, onToast]);
-
-  useEffect(() => {
-    if (!activeTimerTask || !activeTimerStart) return;
-    const timerKey = `${activeTimerTask.id}:${activeTimerStart}`;
-    let settled = false;
-    const syncTimer = () => {
-      if (settled || completedTimerKeyRef.current === timerKey) return;
-      const rem = calculateRemainingSeconds(activeTimerStart, activeTimerTask.timer);
-      if (rem <= 0) {
-        settled = true;
-        completedTimerKeyRef.current = timerKey;
-        setFlow(null);
-        setSubmitting(true);
-        void onCompleteTaskRef.current(activeTimerTask).finally(() => setSubmitting(false));
-      } else {
-        setFlow((prev) =>
-          prev && prev.kind === 'timer' && prev.secondsLeft !== rem
-            ? { ...prev, secondsLeft: rem }
-            : prev
-        );
-      }
-    };
-
-    syncTimer();
-    const interval = window.setInterval(syncTimer, 250);
-    window.addEventListener('focus', syncTimer);
-    document.addEventListener('visibilitychange', syncTimer);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', syncTimer);
-      document.removeEventListener('visibilitychange', syncTimer);
-    };
-  }, [activeTimerTask, activeTimerStart]);
 
   const openSellModal = (platform: AccountPlatform) => {
     const enabled = platform === 'gmail' ? sellSettings.gmailEnabled : sellSettings.facebookEnabled;
@@ -194,90 +112,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
-  const startTask = (task: MergedTaskConfig) => {
-    if (submitting || flow !== null) return;
-    if (!task.enabled) {
-      onToast('এই কাজটি শীঘ্রই আসছে', 'gold');
-      return;
-    }
-    const done = account.dailyTasks?.[task.id] || 0;
-    if (done >= task.limit) {
-      onToast('আজকের জন্য এই টাস্কের সীমা শেষ', 'err');
-      return;
-    }
-
-    if (task.id === 'invite') {
-      setFlow({ kind: 'invite', task });
-      return;
-    }
-
-    if (task.url) {
-      if (task.timer > 0) {
-        setFlow({ kind: 'timer', task, startedAtMs: Date.now(), secondsLeft: task.timer });
-      } else {
-        setFlow({ kind: 'visit_confirm', task });
-      }
-      return;
-    }
-
-    if (task.id === 'quiz') {
-      const question = QUIZ_DATA[Math.floor(Math.random() * QUIZ_DATA.length)];
-      setFlow({ kind: 'quiz', task, question });
-    } else if (task.id === 'survey') {
-      setFlow({ kind: 'survey', task, step: 0 });
-    } else {
-      setFlow({ kind: 'timer', task, startedAtMs: Date.now(), secondsLeft: task.timer });
-    }
-  };
-
-  const handleConfirmVisit = async () => {
-    if (submitting || !flow || flow.kind !== 'visit_confirm') return;
-    const t = flow.task;
-    setFlow(null);
-    setSubmitting(true);
-    try {
-      await onCompleteTaskRef.current(t);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleQuizAnswer = async (index: number) => {
-    if (submitting || !flow || flow.kind !== 'quiz') return;
-    if (index === flow.question.ans) {
-      const t = flow.task;
-      setFlow(null);
-      setSubmitting(true);
-      try {
-        await onCompleteTaskRef.current(t);
-      } finally {
-        setSubmitting(false);
-      }
-    } else {
-      setFlow({
-        kind: 'wrong',
-        correctAnswer: flow.question.opts[flow.question.ans],
-      });
-    }
-  };
-
-  const handleSurveyAnswer = async () => {
-    if (submitting || !flow || flow.kind !== 'survey') return;
-    const nextStep = flow.step + 1;
-    if (nextStep >= SURVEY_DATA.length) {
-      const t = flow.task;
-      setFlow(null);
-      setSubmitting(true);
-      try {
-        await onCompleteTaskRef.current(t);
-      } finally {
-        setSubmitting(false);
-      }
-    } else {
-      setFlow({ ...flow, step: nextStep });
-    }
-  };
-
   const accountSellCards: Array<{
     platform: AccountPlatform;
     title: string;
@@ -311,7 +145,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
     sellModal === 'gmail' ? sellSettings.gmailPrice : sellSettings.facebookPrice;
   const activeSellAdminPass =
     sellModal === 'gmail' ? sellSettings.gmailPassword : sellSettings.facebookPassword;
-  const mergedTasks = buildMergedTasks(regularTaskSettings, referralSettings);
 
   return (
     <div className="space-y-6">
@@ -436,97 +269,34 @@ export const TasksView: React.FC<TasksViewProps> = ({
         </section>
       )}
 
-      {/* Daily Earning Tasks */}
-      <section className="space-y-3.5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold">দৈনিক আর্নিং টাস্কসমূহ</h2>
-            <p className="text-xs text-[var(--muted)]">প্রতিদিন রাত ১২টায় দৈনিক সীমা রিসেট হয়</p>
+      {/* Referral Invite Card */}
+      <section className="rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5 min-w-0">
+          <div className="w-12 h-12 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-[var(--gold)] shrink-0">
+            <Users className="w-6 h-6" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold">বন্ধু আমন্ত্রণ ও রেফারেল বোনাস</h3>
+            <p className="text-xs text-[var(--muted)] mt-0.5">
+              প্রতি সফল রেফারে আপনি{' '}
+              <span className="font-bold font-mono-num text-[var(--emerald)]">
+                +৳{fmtBnReward(referralSettings.referrerBonus)}
+              </span>{' '}
+              এবং বন্ধু{' '}
+              <span className="font-bold font-mono-num text-[var(--primary)]">
+                +৳{fmtBnReward(referralSettings.friendBonus)}
+              </span>{' '}
+              বোনাস পাবেন
+            </p>
           </div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {mergedTasks.map((task) => {
-            const done = account.dailyTasks?.[task.id] || 0;
-            const remaining = Math.max(0, task.limit - done);
-            const finished = task.enabled && remaining === 0;
-            const hasExternalLink = Boolean(task.enabled && !finished && task.url);
-
-            return (
-              <div
-                key={task.id}
-                className={`rounded-2xl bg-[var(--surface)] border border-[var(--border)] p-4 sm:p-5 flex items-center justify-between gap-4 ${
-                  !task.enabled ? 'opacity-80' : ''
-                }`}
-              >
-                <div className="flex items-center gap-3.5 min-w-0">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] flex items-center justify-center text-2xl shrink-0">
-                    {task.icon}
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold truncate">{task.title}</h3>
-                    <p className="text-xs text-[var(--muted)] mt-0.5">
-                      {!task.enabled ? (
-                        'এই কাজটি শীঘ্রই আসছে'
-                      ) : (
-                        <>
-                          {task.desc} · বাকি{' '}
-                          <span className="font-mono-num">
-                            {toBn(remaining)}/{toBn(task.limit)}
-                          </span>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  {task.enabled && (
-                    <span className="text-xs font-bold font-mono-num text-[var(--emerald)]">
-                      +৳{fmtBnReward(task.reward)}
-                    </span>
-                  )}
-
-                  {!task.enabled ? (
-                    <button
-                      type="button"
-                      disabled
-                      className="min-h-[40px] px-4 py-1.5 rounded-xl bg-[var(--surface-2)] text-[var(--muted)] border border-[var(--border)] text-xs font-semibold cursor-not-allowed whitespace-nowrap"
-                    >
-                      শীঘ্রই আসছে
-                    </button>
-                  ) : hasExternalLink ? (
-                    <a
-                      href={task.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => {
-                        if (submitting) {
-                          e.preventDefault();
-                          return;
-                        }
-                        startTask(task);
-                      }}
-                      className="min-h-[40px] px-4 py-1.5 rounded-xl bg-[var(--primary)] hover:opacity-95 text-white text-xs font-semibold transition-opacity inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
-                    >
-                      <span>শুরু করুন</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={finished || submitting}
-                      onClick={() => startTask(task)}
-                      className="min-h-[40px] px-4 py-1.5 rounded-xl bg-[var(--primary)] hover:opacity-95 text-white text-xs font-semibold transition-opacity cursor-pointer disabled:bg-[var(--surface-2)] disabled:text-[var(--muted)] disabled:cursor-not-allowed whitespace-nowrap"
-                    >
-                      {finished ? 'সম্পন্ন' : 'শুরু করুন'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <button
+          type="button"
+          onClick={() => setInviteOpen(true)}
+          className="min-h-[40px] px-4 py-2 rounded-xl bg-[var(--primary)] hover:opacity-95 text-white text-xs font-semibold transition-opacity cursor-pointer whitespace-nowrap shrink-0"
+        >
+          রেফার কোড ও শর্ত দেখুন
+        </button>
       </section>
 
       {/* Gmail / Facebook Sell Submission Modal */}
@@ -623,195 +393,71 @@ export const TasksView: React.FC<TasksViewProps> = ({
       </Modal>
 
       <Modal
-        open={flow !== null}
-        onClose={() => setFlow(null)}
-        title={
-          flow?.kind === 'timer' || flow?.kind === 'visit_confirm'
-            ? flow.task.title
-            : flow?.kind === 'quiz'
-              ? 'দৈনিক কুইজ'
-              : flow?.kind === 'survey'
-                ? `সার্ভে প্রশ্ন ${toBn(flow.step + 1)}/${toBn(SURVEY_DATA.length)}`
-                : flow?.kind === 'invite'
-                  ? 'বন্ধুকে আমন্ত্রণ জানান'
-                  : 'সঠিক উত্তর'
-        }
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        title="বন্ধুকে আমন্ত্রণ জানান"
       >
-        {flow?.kind === 'timer' && (
-          <div className="text-center py-2 space-y-4">
-            <div className="text-4xl">{flow.task.icon}</div>
-            <p className="text-sm text-[var(--muted)]">
-              {flow.task.url
-                ? 'খোলা লিংকটি নির্ধারিত সময় পর্যন্ত ভিজিট করুন; সময় শেষ হলেই পুরস্কার ব্যালেন্সে যোগ হবে'
-                : 'পুরস্কার নিশ্চিত করতে নিচের সময় শেষ হওয়া পর্যন্ত অপেক্ষা করুন'}
-            </p>
-            <div className="text-4xl font-bold font-mono-num text-[var(--primary)]">
-              {toBn(flow.secondsLeft)} সেকেন্ড
-            </div>
-            <div className="h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--primary)] transition-all duration-300 linear"
-                style={{
-                  width: `${Math.round(((flow.task.timer - flow.secondsLeft) / Math.max(1, flow.task.timer)) * 100)}%`,
-                }}
-              />
-            </div>
-            {flow.task.url && (
-              <a
-                href={flow.task.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--primary)] text-xs font-semibold text-[var(--text)]"
-              >
-                <span>লিংকটি পুনরায় খুলুন</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            )}
-          </div>
-        )}
+        <div className="space-y-4">
+          <p className="text-sm leading-relaxed text-[var(--text)]">
+            বন্ধুকে আমন্ত্রণ জানালে আপনি{' '}
+            <strong className="text-[var(--emerald)] font-mono-num">
+              ৳{fmtBnReward(referralSettings.referrerBonus)}
+            </strong>{' '}
+            পাবেন এবং আপনার বন্ধু{' '}
+            <strong className="text-[var(--primary)] font-mono-num">
+              ৳{fmtBnReward(referralSettings.friendBonus)}
+            </strong>{' '}
+            বোনাস পাবে!
+          </p>
 
-        {flow?.kind === 'visit_confirm' && (
-          <div className="text-center py-2 space-y-4">
-            <div className="text-4xl">{flow.task.icon}</div>
-            <p className="text-sm text-[var(--muted)] leading-relaxed">
-              লিংকটি দেখা সম্পন্ন হয়ে থাকলে নিচের বাটনে ক্লিক করে +৳{fmtBnReward(flow.task.reward)} পুরস্কার সংগ্রহ করুন।
-            </p>
-            <div className="flex flex-col gap-2.5">
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center">
+              <p className="text-[11px] text-[var(--muted)]">আপনি পাবেন</p>
+              <p className="text-base font-bold font-mono-num text-[var(--emerald)]">
+                +৳{fmtBnReward(referralSettings.referrerBonus)}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/30 text-center">
+              <p className="text-[11px] text-[var(--muted)]">আপনার বন্ধু পাবে</p>
+              <p className="text-base font-bold font-mono-num text-[var(--primary)]">
+                +৳{fmtBnReward(referralSettings.friendBonus)}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs text-[var(--muted)] mb-1.5">আপনার রেফারেল কোড</p>
+            <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[var(--surface-2)] border border-dashed border-[var(--primary)]/50">
+              <code className="text-base font-bold font-mono-num tracking-widest text-[var(--primary)]">
+                {account.refCode}
+              </code>
               <button
                 type="button"
-                disabled={submitting}
-                onClick={() => void handleConfirmVisit()}
-                className="w-full min-h-[44px] rounded-xl bg-[var(--primary)] text-white text-sm font-semibold cursor-pointer disabled:opacity-50"
+                onClick={() => void copyText(account.refCode, 'রেফারেল কোড')}
+                className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
-                {submitting ? 'যোগ হচ্ছে...' : 'পুরস্কার সংগ্রহ করুন'}
+                <Copy className="w-3.5 h-3.5" />
+                <span>কোড কপি</span>
               </button>
-              {flow.task.url && (
-                <a
-                  href={flow.task.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-semibold text-[var(--muted)]"
-                >
-                  <span>আবার লিংক খুলুন</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
             </div>
           </div>
-        )}
 
-        {flow?.kind === 'quiz' && (
-          <div className="space-y-2.5">
-            <p className="text-sm font-semibold mb-3">{flow.question.q}</p>
-            {flow.question.opts.map((opt, idx) => (
-              <button
-                key={opt}
-                type="button"
-                disabled={submitting}
-                onClick={() => handleQuizAnswer(idx)}
-                className="w-full min-h-[44px] text-left px-4 py-2.5 rounded-xl bg-[var(--surface-2)] hover:border-[var(--primary)] border border-[var(--border)] text-sm font-medium cursor-pointer transition-colors disabled:opacity-50"
-              >
-                {opt}
-              </button>
-            ))}
+          <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
+            <p className="text-xs font-bold text-[var(--text)]">রেফারেলের শর্তাবলি:</p>
+            <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--muted)] leading-relaxed">
+              <li>
+                রেজিস্ট্রেশনের সময় আপনার বন্ধুকে রেফার কোডের ঘরে{' '}
+                <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong> লিখতে হবে।
+              </li>
+              <li>
+                {referralSettings.minTasks > 0
+                  ? `বন্ধুকে কমপক্ষে ${toBn(referralSettings.minTasks)}টি দৈনিক চেক-ইন বা কাজ সম্পন্ন করতে হবে, তবেই উভয়ের বোনাস যোগ হবে।`
+                  : 'অ্যাকাউন্ট খোলার পর প্রথম কার্যক্রমেই বোনাস আনলক হবে।'}
+              </li>
+              {referralSettings.conditionNote && <li>{referralSettings.conditionNote}</li>}
+            </ol>
           </div>
-        )}
-
-        {flow?.kind === 'survey' && (
-          <div className="space-y-2.5">
-            <p className="text-sm font-semibold mb-3">{SURVEY_DATA[flow.step].q}</p>
-            {SURVEY_DATA[flow.step].opts.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                disabled={submitting}
-                onClick={handleSurveyAnswer}
-                className="w-full min-h-[44px] text-left px-4 py-2.5 rounded-xl bg-[var(--surface-2)] hover:border-[var(--primary)] border border-[var(--border)] text-sm font-medium cursor-pointer transition-colors disabled:opacity-50"
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {flow?.kind === 'invite' && (
-          <div className="space-y-4">
-            <p className="text-sm leading-relaxed text-[var(--text)]">
-              বন্ধুকে আমন্ত্রণ জানালে আপনি{' '}
-              <strong className="text-[var(--emerald)] font-mono-num">
-                ৳{fmtBnReward(referralSettings.referrerBonus)}
-              </strong>{' '}
-              পাবেন এবং আপনার বন্ধু{' '}
-              <strong className="text-[var(--primary)] font-mono-num">
-                ৳{fmtBnReward(referralSettings.friendBonus)}
-              </strong>{' '}
-              বোনাস পাবে!
-            </p>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center">
-                <p className="text-[11px] text-[var(--muted)]">আপনি পাবেন</p>
-                <p className="text-base font-bold font-mono-num text-[var(--emerald)]">
-                  +৳{fmtBnReward(referralSettings.referrerBonus)}
-                </p>
-              </div>
-              <div className="p-3 rounded-xl bg-[var(--primary)]/10 border border-[var(--primary)]/30 text-center">
-                <p className="text-[11px] text-[var(--muted)]">আপনার বন্ধু পাবে</p>
-                <p className="text-base font-bold font-mono-num text-[var(--primary)]">
-                  +৳{fmtBnReward(referralSettings.friendBonus)}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <p className="text-xs text-[var(--muted)] mb-1.5">আপনার রেফারেল কোড</p>
-              <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[var(--surface-2)] border border-dashed border-[var(--primary)]/50">
-                <code className="text-base font-bold font-mono-num tracking-widest text-[var(--primary)]">
-                  {account.refCode}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => void copyText(account.refCode, 'রেফারেল কোড')}
-                  className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>কোড কপি</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
-              <p className="text-xs font-bold text-[var(--text)]">রেফারেলের শর্তাবলি:</p>
-              <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--muted)] leading-relaxed">
-                <li>
-                  রেজিস্ট্রেশনের সময় আপনার বন্ধুকে রেফার কোডের ঘরে{' '}
-                  <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong> লিখতে হবে।
-                </li>
-                <li>
-                  {referralSettings.minTasks > 0
-                    ? `বন্ধুকে কমপক্ষে ${toBn(referralSettings.minTasks)}টি টাস্ক বা স্পিন সম্পন্ন করতে হবে, তবেই উভয়ের বোনাস যোগ হবে।`
-                    : 'অ্যাকাউন্ট খোলার পর প্রথম কার্যক্রমেই বোনাস আনলক হবে।'}
-                </li>
-                {referralSettings.conditionNote && <li>{referralSettings.conditionNote}</li>}
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {flow?.kind === 'wrong' && (
-          <div className="text-center space-y-4">
-            <p className="text-sm text-[var(--muted)]">
-              ভুল উত্তর! সঠিক উত্তর: <strong className="text-[var(--text)]">{flow.correctAnswer}</strong>
-            </p>
-            <button
-              type="button"
-              onClick={() => setFlow(null)}
-              className="w-full min-h-[44px] rounded-xl bg-[var(--primary)] text-white text-sm font-semibold cursor-pointer"
-            >
-              ঠিক আছে
-            </button>
-          </div>
-        )}
+        </div>
       </Modal>
     </div>
   );
