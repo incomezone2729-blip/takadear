@@ -1,5 +1,9 @@
 import { auth } from '../firebase';
 import type { TelegramClientNotificationInput } from '../server/telegram';
+import {
+  resolveApiUrl,
+  safeParseJsonResponse,
+} from '../utils/apiResponse';
 
 export interface ApiHealthResponse {
   status: string;
@@ -38,6 +42,8 @@ export interface SignedReceiptResponse {
   verifiedAt: number;
 }
 
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+
 async function getBearerHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const user = auth.currentUser;
   if (!user) {
@@ -45,69 +51,97 @@ async function getBearerHeaders(forceRefresh = false): Promise<Record<string, st
   }
   const token = await user.getIdToken(forceRefresh);
   return {
+    Accept: 'application/json',
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
   };
 }
 
 async function fetchWithFreshAuth(url: string, init: Omit<RequestInit, 'headers'>): Promise<Response> {
-  const headers = await getBearerHeaders(false);
-  const res = await fetch(url, { ...init, headers });
+  const targetUrl = resolveApiUrl(url);
+  const executeFetch = async (forceRefresh: boolean) => {
+    const headers = await getBearerHeaders(forceRefresh);
+    return fetch(targetUrl, { ...init, headers });
+  };
+
+  let res = await executeFetch(false);
+  if (TRANSIENT_GATEWAY_STATUSES.has(res.status)) {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    res = await executeFetch(false);
+  }
   if (res.status === 401 && auth.currentUser) {
-    const refreshedHeaders = await getBearerHeaders(true);
-    return fetch(url, { ...init, headers: refreshedHeaders });
+    res = await executeFetch(true);
   }
   return res;
 }
 
-export async function fetchApiHealth(): Promise<ApiHealthResponse> {
-  const res = await fetch('/api/health');
-  if (!res.ok) {
-    throw new Error(`API health check failed (${res.status})`);
+async function fetchPublicJson<T>(url: string, fallbackError: string): Promise<T> {
+  const targetUrl = resolveApiUrl(url);
+  let res = await fetch(targetUrl, {
+    headers: { Accept: 'application/json' },
+  });
+  if (TRANSIENT_GATEWAY_STATUSES.has(res.status)) {
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    res = await fetch(targetUrl, {
+      headers: { Accept: 'application/json' },
+    });
   }
-  return (await res.json()) as ApiHealthResponse;
+  return safeParseJsonResponse<T>(res, fallbackError);
+}
+
+async function fetchAuthedJson<T>(
+  url: string,
+  init: Omit<RequestInit, 'headers'>,
+  fallbackError: string
+): Promise<T> {
+  const res = await fetchWithFreshAuth(url, init);
+  return safeParseJsonResponse<T>(res, fallbackError);
+}
+
+export async function fetchApiHealth(): Promise<ApiHealthResponse> {
+  return fetchPublicJson<ApiHealthResponse>('/api/health', 'API হেলথ চেক ব্যর্থ হয়েছে');
 }
 
 export async function verifyServerSession(): Promise<SessionVerifyResponse> {
-  const res = await fetchWithFreshAuth('/api/auth/session', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'সেশন ভেরিফিকেশন ব্যর্থ');
-  }
-  return (await res.json()) as SessionVerifyResponse;
+  return fetchAuthedJson<SessionVerifyResponse>(
+    '/api/auth/session',
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+    'সেশন ভেরিফিকেশন ব্যর্থ হয়েছে'
+  );
 }
 
 export async function encryptFieldOnServer(
   type: 'email' | 'wallet_number' | 'phone' | 'credentials',
   value: string
 ): Promise<EncryptResponse> {
-  const res = await fetchWithFreshAuth('/api/secure/encrypt', {
-    method: 'POST',
-    body: JSON.stringify({ type, value }),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'ডাটা এনক্রিপশন ব্যর্থ হয়েছে');
-  }
-  return (await res.json()) as EncryptResponse;
+  return fetchAuthedJson<EncryptResponse>(
+    '/api/secure/encrypt',
+    {
+      method: 'POST',
+      body: JSON.stringify({ type, value }),
+    },
+    'ডাটা এনক্রিপশন ব্যর্থ হয়েছে'
+  );
 }
 
 export async function decryptFieldOnServer(
   encrypted: string,
   ownerUid: string
 ): Promise<string> {
-  const res = await fetchWithFreshAuth('/api/secure/decrypt', {
-    method: 'POST',
-    body: JSON.stringify({ encrypted, ownerUid }),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'ডিক্রিপশন অনুমোদিত নয়');
+  const data = await fetchAuthedJson<{ plaintext?: unknown }>(
+    '/api/secure/decrypt',
+    {
+      method: 'POST',
+      body: JSON.stringify({ encrypted, ownerUid }),
+    },
+    'ডিক্রিপশন অনুমোদিত নয়'
+  );
+  if (typeof data.plaintext !== 'string') {
+    throw new Error('ডিক্রিপ্টেড ডাটা পাওয়া যায়নি');
   }
-  const data = (await res.json()) as { plaintext: string };
   return data.plaintext;
 }
 
@@ -115,16 +149,15 @@ export async function decryptBatchOnServer(
   items: Array<{ id: string; encrypted: string }>
 ): Promise<Record<string, string | null>> {
   if (items.length === 0) return {};
-  const res = await fetchWithFreshAuth('/api/admin/decrypt-batch', {
-    method: 'POST',
-    body: JSON.stringify({ items }),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'ব্যাচ ডিক্রিপশন অনুমোদিত নয়');
-  }
-  const data = (await res.json()) as { results?: Record<string, string | null> };
-  return data.results || {};
+  const data = await fetchAuthedJson<{ results?: Record<string, string | null> }>(
+    '/api/admin/decrypt-batch',
+    {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    },
+    'ব্যাচ ডিক্রিপশন অনুমোদিত নয়'
+  );
+  return data.results && typeof data.results === 'object' ? data.results : {};
 }
 
 export interface AdminSecurityStatus {
@@ -135,54 +168,46 @@ export interface AdminSecurityStatus {
   signatureAlgorithm: string;
   tokenVerification: string;
   customKeyConfigured: boolean;
+  telegramConfigured?: boolean;
 }
 
 export async function fetchAdminSecurityStatus(): Promise<AdminSecurityStatus> {
-  const res = await fetchWithFreshAuth('/api/admin/security-status', {
-    method: 'GET',
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'অ্যাডমিন সিকিউরিটি স্ট্যাটাস লোড ব্যর্থ');
-  }
-  return (await res.json()) as AdminSecurityStatus;
+  return fetchAuthedJson<AdminSecurityStatus>(
+    '/api/admin/security-status',
+    { method: 'GET' },
+    'অ্যাডমিন সিকিউরিটি স্ট্যাটাস লোড ব্যর্থ হয়েছে'
+  );
 }
 
 export async function signRewardReceipt(params: {
   action:
-    | 'signup'
     | 'referral'
     | 'referral_friend'
     | 'checkin'
-    | 'task'
-    | 'spin'
     | 'withdrawal'
     | 'admin_adjust'
     | 'account_submit'
     | 'account_approve';
   amount: number;
-  taskId?: string;
-  prizeIndex?: number;
   streakDay?: number;
   method?: string;
   platform?: 'gmail' | 'facebook';
 }): Promise<SignedReceiptResponse> {
-  const res = await fetchWithFreshAuth('/api/rewards/sign', {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(data.error || 'সিকিউর রসিদ স্বাক্ষর ব্যর্থ হয়েছে');
-  }
-  return (await res.json()) as SignedReceiptResponse;
+  return fetchAuthedJson<SignedReceiptResponse>(
+    '/api/rewards/sign',
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    },
+    'সিকিউর রসিদ স্বাক্ষর ব্যর্থ হয়েছে'
+  );
 }
 
 export async function notifyTelegramEvent(event: TelegramClientNotificationInput): Promise<void> {
   try {
     if (!auth.currentUser) return;
-    const headers = await getBearerHeaders();
-    await fetch('/api/notify/telegram', {
+    const headers = await getBearerHeaders(false);
+    await fetch(resolveApiUrl('/api/notify/telegram'), {
       method: 'POST',
       headers,
       body: JSON.stringify(event),

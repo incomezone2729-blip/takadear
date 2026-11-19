@@ -6,7 +6,7 @@ import {
   subscribeSupportMessages,
   type SupportMessageRecord,
 } from '../services/firestoreService';
-import { validateSupportMessageText } from '../utils/takadearLogic';
+import { formatAppErrorMessage, validateSupportMessageText } from '../utils/takadearLogic';
 
 interface LiveSupportChatProps {
   threadUid: string;
@@ -50,7 +50,7 @@ export const LiveSupportChat: React.FC<LiveSupportChatProps> = ({
       },
       (err) => {
         setLoading(false);
-        setError(err.message || 'মেসেজ লোড করতে সমস্যা হয়েছে');
+        setError(formatAppErrorMessage(err, 'মেসেজ লোড করতে সমস্যা হয়েছে'));
       }
     );
     return () => unsub();
@@ -84,7 +84,7 @@ export const LiveSupportChat: React.FC<LiveSupportChatProps> = ({
       });
       setText('');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'মেসেজ পাঠানো যায়নি';
+      const msg = formatAppErrorMessage(err, 'মেসেজ পাঠানো যায়নি');
       setError(msg);
       if (onToast) onToast(msg, 'err');
     } finally {

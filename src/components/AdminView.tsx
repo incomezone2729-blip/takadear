@@ -48,6 +48,7 @@ import {
   filterWithdrawalsByStatus,
   fmtAmount,
   fmtBnReward,
+  formatAppErrorMessage,
   toBn,
   validateAdminBalanceDelta,
   validateReferralSettings,
@@ -139,7 +140,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setWithdrawalFeeForm(dashboardRes.withdrawalSettings);
       if (secRes) setSecurityStatus(secRes);
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'অ্যাডমিন ডেটা লোড ব্যর্থ', 'err');
+      onToast(formatAppErrorMessage(err, 'অ্যাডমিন ডেটা লোড ব্যর্থ'), 'err');
     } finally {
       setLoading(false);
     }
@@ -155,7 +156,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setSupportThreads(threads);
       },
       (err) => {
-        onToast(err.message || 'লাইভ সাপোর্ট লোড ব্যর্থ', 'err');
+        onToast(formatAppErrorMessage(err, 'লাইভ সাপোর্ট লোড ব্যর্থ'), 'err');
       }
     );
     return () => unsub();
@@ -191,7 +192,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         void loadSelectedUserActivity(uid);
       }
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'ব্যালেন্স আপডেট ব্যর্থ হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'ব্যালেন্স আপডেট ব্যর্থ হয়েছে'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -228,7 +229,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       );
       await load();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'স্ট্যাটাস আপডেট ব্যর্থ', 'err');
+      onToast(formatAppErrorMessage(err, 'স্ট্যাটাস আপডেট ব্যর্থ'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -239,7 +240,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const plain = await adminDecryptWithdrawalNumber(encrypted, ownerUid);
       setDecryptedNumbers((prev) => ({ ...prev, [wdId]: plain }));
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'ডিক্রিপশন ব্যর্থ', 'err');
+      onToast(formatAppErrorMessage(err, 'ডিক্রিপশন ব্যর্থ'), 'err');
     }
   };
 
@@ -257,7 +258,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onToast('জিমেইল ও ফেসবুক সেলের দাম ও পাসওয়ার্ড সেভ হয়েছে', 'ok');
       await load();
     } catch (saveErr) {
-      onToast(saveErr instanceof Error ? saveErr.message : 'সেভ করা যায়নি', 'err');
+      onToast(formatAppErrorMessage(saveErr, 'সেভ করা যায়নি'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -276,7 +277,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onToast('রেফারেল বোনাস ও শর্তাবলি সেভ হয়েছে', 'ok');
       await load();
     } catch (saveErr) {
-      onToast(saveErr instanceof Error ? saveErr.message : 'রেফারেল সেটিংস সেভ করা যায়নি', 'err');
+      onToast(formatAppErrorMessage(saveErr, 'রেফারেল সেটিংস সেভ করা যায়নি'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -295,7 +296,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onToast('বিকাশ উইথড্র ফি সেটিংস সেভ হয়েছে', 'ok');
       await load();
     } catch (saveErr) {
-      onToast(saveErr instanceof Error ? saveErr.message : 'উইথড্র ফি সেভ করা যায়নি', 'err');
+      onToast(formatAppErrorMessage(saveErr, 'উইথড্র ফি সেভ করা যায়নি'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -309,7 +310,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       );
       setDecryptedSubs((prev) => ({ ...prev, [sub.id]: creds }));
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'ডিক্রিপশন ব্যর্থ', 'err');
+      onToast(formatAppErrorMessage(err, 'ডিক্রিপশন ব্যর্থ'), 'err');
     }
   };
 
@@ -320,7 +321,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onToast(`${sub.userName}-এর অ্যাকাউন্ট এপ্রুভ ও +৳${sub.amount} যোগ হয়েছে`, 'ok');
       await load();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'এপ্রুভ করতে সমস্যা হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'এপ্রুভ করতে সমস্যা হয়েছে'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -337,7 +338,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setRejectNote('');
       await load();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'রিজেক্ট করতে সমস্যা হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'রিজেক্ট করতে সমস্যা হয়েছে'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -354,7 +355,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setSuspendReason('');
       await load();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'সাসপেন্ড করতে সমস্যা হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'সাসপেন্ড করতে সমস্যা হয়েছে'), 'err');
     } finally {
       setBusyAction(false);
     }
@@ -367,7 +368,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onToast(`${user.name}-এর অ্যাকাউন্ট পুনরায় সচল করা হয়েছে`, 'ok');
       await load();
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'অ্যাক্টিভ করতে সমস্যা হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'অ্যাক্টিভ করতে সমস্যা হয়েছে'), 'err');
     } finally {
       setBusyAction(false);
     }

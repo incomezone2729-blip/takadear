@@ -13,6 +13,7 @@ import type { AccountSubmissionRecord } from '../services/firestoreService';
 import {
   filterAccountSubmissionsByPlatform,
   fmtAmount,
+  formatAppErrorMessage,
   toBn,
   validateAccountSubmissionInput,
   type AccountPlatform,
@@ -28,7 +29,6 @@ interface AccountSellPageProps {
     platform: AccountPlatform;
     identifier: string;
     password: string;
-    price: number;
     note?: string;
   }) => Promise<void>;
   onBackHome: () => void;
@@ -93,14 +93,13 @@ export const AccountSellPage: React.FC<AccountSellPageProps> = ({
         platform,
         identifier: identifier.trim(),
         password: password.trim(),
-        price,
         note: isGmail ? undefined : note.trim(),
       });
       setIdentifier('');
       setNote('');
       setPassword(presetPassword || '');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'সাবমিট করতে সমস্যা হয়েছে');
+      setError(formatAppErrorMessage(err, 'সাবমিট করতে সমস্যা হয়েছে'));
     } finally {
       setSubmitting(false);
     }

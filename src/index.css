@@ -49,16 +49,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.wheel-spin-transition {
-  transition: transform 4.6s cubic-bezier(0.17, 0.67, 0.16, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wheel-spin-transition {
-    transition-duration: 0.4s;
-  }
-}
-
 .text-balance {
   text-wrap: balance;
 }

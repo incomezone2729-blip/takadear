@@ -42,7 +42,10 @@ async function fetchGoogleCerts(): Promise<Record<string, string>> {
     return certCache.certs;
   }
 
-  const res = await fetch(GOOGLE_CERTS_URL);
+  const res = await fetch(GOOGLE_CERTS_URL, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) {
     throw new Error(`Failed to fetch Firebase public keys: HTTP ${res.status}`);
   }
@@ -50,7 +53,20 @@ async function fetchGoogleCerts(): Promise<Record<string, string>> {
   if (serverDateMs !== null) {
     googleClockOffsetMs = serverDateMs - Date.now();
   }
-  const certs = (await res.json()) as Record<string, string>;
+  const rawBody = await res.text();
+  if (!rawBody || !rawBody.trim()) {
+    throw new Error('Empty response received when fetching Firebase public keys');
+  }
+  let certs: Record<string, string>;
+  try {
+    const parsed = JSON.parse(rawBody) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Unexpected certificate map format');
+    }
+    certs = parsed as Record<string, string>;
+  } catch {
+    throw new Error('Invalid JSON received when fetching Firebase public keys');
+  }
   const cacheControl = res.headers.get('cache-control') || '';
   const maxAgeMatch = cacheControl.match(/max-age=(\d+)/i);
   const maxAgeSec = maxAgeMatch ? Number(maxAgeMatch[1]) : 3600;
@@ -63,8 +79,12 @@ async function fetchGoogleCerts(): Promise<Record<string, string>> {
 }
 
 function decodeBase64UrlJson<T>(segment: string): T {
-  const json = Buffer.from(segment, 'base64url').toString('utf8');
-  return JSON.parse(json) as T;
+  try {
+    const json = Buffer.from(segment, 'base64url').toString('utf8');
+    return JSON.parse(json) as T;
+  } catch {
+    throw new Error('Malformed Firebase JWT segment');
+  }
 }
 
 export interface DecodedFirebaseJwtPayload {

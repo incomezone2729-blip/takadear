@@ -6,6 +6,7 @@ import {
   DEFAULT_WITHDRAWAL_SETTINGS,
   fmtAmount,
   fmtBnReward,
+  formatAppErrorMessage,
   MIN_WITHDRAW,
   roundMoney,
   toBn,
@@ -71,7 +72,7 @@ export const WalletView: React.FC<WalletViewProps> = ({
       setAmountInput('');
       setConfirmOpen(false);
     } catch (err) {
-      onToast(err instanceof Error ? err.message : 'উত্তোলন ব্যর্থ হয়েছে', 'err');
+      onToast(formatAppErrorMessage(err, 'উত্তোলন ব্যর্থ হয়েছে'), 'err');
     } finally {
       setSubmitting(false);
     }

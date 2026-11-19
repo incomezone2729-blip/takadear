@@ -485,47 +485,6 @@
         "updatedAt"
       ]
     },
-    "RegularTaskSettings": {
-      "title": "RegularTaskSettings",
-      "description": "Admin-controlled ON/OFF toggle, daily limits, rewards, view durations, and destination links for regular tasks (ad, article, quiz, survey, app).",
-      "type": "object",
-      "properties": {
-        "adEnabled": { "type": "boolean" },
-        "adLimit": { "type": "integer" },
-        "adReward": { "type": "number" },
-        "adTimer": { "type": "integer" },
-        "adUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
-        "articleEnabled": { "type": "boolean" },
-        "articleLimit": { "type": "integer" },
-        "articleReward": { "type": "number" },
-        "articleTimer": { "type": "integer" },
-        "articleUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
-        "quizEnabled": { "type": "boolean" },
-        "quizLimit": { "type": "integer" },
-        "quizReward": { "type": "number" },
-        "quizTimer": { "type": "integer" },
-        "quizUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
-        "surveyEnabled": { "type": "boolean" },
-        "surveyLimit": { "type": "integer" },
-        "surveyReward": { "type": "number" },
-        "surveyTimer": { "type": "integer" },
-        "surveyUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
-        "appEnabled": { "type": "boolean" },
-        "appLimit": { "type": "integer" },
-        "appReward": { "type": "number" },
-        "appTimer": { "type": "integer" },
-        "appUrl": { "type": "string", "maxLength": 500, "pattern": "^(|https?://[^\\s]+)$" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": [
-        "adEnabled", "adLimit", "adReward", "adTimer", "adUrl",
-        "articleEnabled", "articleLimit", "articleReward", "articleTimer", "articleUrl",
-        "quizEnabled", "quizLimit", "quizReward", "quizTimer", "quizUrl",
-        "surveyEnabled", "surveyLimit", "surveyReward", "surveyTimer", "surveyUrl",
-        "appEnabled", "appLimit", "appReward", "appTimer", "appUrl",
-        "updatedAt"
-      ]
-    },
     "ReferralSettings": {
       "title": "ReferralSettings",
       "description": "Admin-controlled referrer bonus, friend welcome bonus, and minimum task conditions for referrals.",

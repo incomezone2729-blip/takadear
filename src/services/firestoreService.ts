@@ -1446,7 +1446,6 @@ export async function submitAccountForSale(params: {
   platform: AccountPlatform;
   identifier: string;
   password: string;
-  price: number;
   note?: string;
 }): Promise<AccountSubmissionRecord> {
   const { uid, account, platform, identifier, password, note } = params;

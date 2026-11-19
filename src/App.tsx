@@ -502,7 +502,6 @@ export default function App() {
     platform: AccountPlatform;
     identifier: string;
     password: string;
-    price: number;
     note?: string;
   }) => {
     if (!firebaseUser || !account) return;
@@ -551,18 +550,26 @@ export default function App() {
         <EmailVerificationScreen
           email={firebaseUser.email || ''}
           onResend={async () => {
-            await sendEmailVerification(firebaseUser);
-            showToast('অ্যাডমিন ভেরিফিকেশন ইমেইল পাঠানো হয়েছে! ইনবক্স চেক করুন।', 'ok');
+            try {
+              await sendEmailVerification(firebaseUser);
+              showToast('অ্যাডমিন ভেরিফিকেশন ইমেইল পাঠানো হয়েছে! ইনবক্স চেক করুন।', 'ok');
+            } catch (err) {
+              showToast(formatAppErrorMessage(err, 'ভেরিফিকেশন ইমেইল পাঠানো যায়নি'), 'err');
+            }
           }}
           onRefresh={async () => {
-            await reload(firebaseUser);
-            if (auth.currentUser?.emailVerified) {
-              await auth.currentUser.getIdToken(true);
-              setFirebaseUser(auth.currentUser);
-              await hydrateUserSession(auth.currentUser);
-              showToast('অ্যাডমিন ইমেইল ভেরিফাই সম্পন্ন হয়েছে!', 'ok');
-            } else {
-              showToast('এখনো ইমেইল ভেরিফাই সম্পন্ন হয়নি', 'err');
+            try {
+              await reload(firebaseUser);
+              if (auth.currentUser?.emailVerified) {
+                await auth.currentUser.getIdToken(true);
+                setFirebaseUser(auth.currentUser);
+                await hydrateUserSession(auth.currentUser);
+                showToast('অ্যাডমিন ইমেইল ভেরিফাই সম্পন্ন হয়েছে!', 'ok');
+              } else {
+                showToast('এখনো ইমেইল ভেরিফাই সম্পন্ন হয়নি', 'err');
+              }
+            } catch (err) {
+              showToast(formatAppErrorMessage(err, 'ভেরিফিকেশন অবস্থা যাচাই করা যায়নি'), 'err');
             }
           }}
           onLogout={handleLogout}

@@ -171,6 +171,14 @@ export function formatAppErrorMessage(err: unknown, fallback: string): string {
   if (lower.includes('permission') || lower.includes('insufficient')) {
     return 'অনুমতি বা তথ্য যাচাই ব্যর্থ হয়েছে, দয়া করে পুনরায় চেষ্টা করুন';
   }
+  if (
+    lower.includes('unexpected end of json') ||
+    lower.includes('unexpected token') ||
+    lower.includes('is not valid json') ||
+    lower.includes("failed to execute 'json'")
+  ) {
+    return 'সার্ভার থেকে অসম্পূর্ণ উত্তর এসেছে, অনুগ্রহ করে পুনরায় চেষ্টা করুন';
+  }
   if (lower.includes('failed to fetch') || lower.includes('network') || lower.includes('offline')) {
     return 'ইন্টারনেট বা সার্ভার সংযোগ ব্যর্থ হয়েছে, আবার চেষ্টা করুন';
   }
@@ -264,10 +272,6 @@ export function generateEasyPassword(): string {
     partB += digits[Math.floor(Math.random() * digits.length)];
   }
   return `${partA}${partB}`;
-}
-
-export function validateRefCode(code: string): boolean {
-  return /^[A-Z0-9_-]{4,24}$/.test(code.trim().toUpperCase());
 }
 
 export function validateBangladeshMobile(phone: string): boolean {

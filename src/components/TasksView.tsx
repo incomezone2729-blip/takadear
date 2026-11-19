@@ -8,6 +8,7 @@ import {
   DEFAULT_REFERRAL_SETTINGS,
   fmtAmount,
   fmtBnReward,
+  formatAppErrorMessage,
   toBn,
   validateAccountSubmissionInput,
   type AccountPlatform,
@@ -26,7 +27,6 @@ interface TasksViewProps {
     platform: AccountPlatform;
     identifier: string;
     password: string;
-    price: number;
     note?: string;
   }) => Promise<void>;
   onToast: (msg: string, variant?: 'default' | 'ok' | 'err' | 'gold') => void;
@@ -83,21 +83,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
       setSellError(err);
       return;
     }
-    const price = sellModal === 'gmail' ? sellSettings.gmailPrice : sellSettings.facebookPrice;
     setSubmitting(true);
     try {
       await onSubmitAccountSale({
         platform: sellModal,
         identifier: sellIdentifier.trim(),
         password: sellPassword.trim(),
-        price,
         note: sellModal === 'gmail' ? undefined : sellNote.trim(),
       });
       setSellModal(null);
     } catch (submitErr) {
-      setSellError(
-        submitErr instanceof Error ? submitErr.message : 'সাবমিট করতে সমস্যা হয়েছে'
-      );
+      setSellError(formatAppErrorMessage(submitErr, 'সাবমিট করতে সমস্যা হয়েছে'));
     } finally {
       setSubmitting(false);
     }
