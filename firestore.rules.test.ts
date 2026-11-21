@@ -69,6 +69,7 @@ test('Dirty Dozen security invariants and tightened reward bounds are guarded in
   assert.match(rulesContent, /match \/spins\/\{spinId\}[\s\S]*allow create, update, delete:\s*if false;/);
   // 8. Admin-controlled referral settings and sell enablement enforcement
   assert.match(rulesContent, /function isValidReferralSettings\(data\)/);
+  assert.match(rulesContent, /'referralDomain'/);
   assert.match(rulesContent, /function isFriendReferralBonusAction\(\)/);
   assert.match(rulesContent, /settingId\s*==\s*'referral_settings'/);
   assert.match(rulesContent, /gmailEnabled\s*==\s*true/);
@@ -85,6 +86,8 @@ test('Dirty Dozen security invariants and tightened reward bounds are guarded in
   assert.match(rulesContent, /\(existing\(\)\.balance - incoming\(\)\.balance\) >= 99\.999/);
   assert.match(rulesContent, /existing\(\)\.balance\s*\+\s*1\.001/);
   assert.match(rulesContent, /function isLegacySchemaRepairAction\(\)/);
+  assert.match(rulesContent, /function isRefCodeUpgradeToTkdAction\(\)/);
+  assert.match(rulesContent, /\^TKD\[0-9\]\{4\}\$/);
   // 10. bKash-only new withdrawals and admin-controlled withdrawal fee enforcement
   assert.match(rulesContent, /function isValidWithdrawalSettings\(data\)/);
   assert.match(rulesContent, /function isMatchingWithdrawalFee\(wd\)/);

@@ -38,6 +38,11 @@ export async function safeParseJsonResponse<T>(
   const contentType = res.headers?.get('content-type')?.toLowerCase() || '';
 
   if (!trimmed) {
+    if (res.status === 200) {
+      throw new Error(
+        'সার্ভার থেকে খালি উত্তর এসেছে (HTTP 200) — ব্যাকএন্ড Node সার্ভার (/api) চালু নেই বা Render Static Site রি-রাইট চলছে; Web Service-এ npm start চালু করুন'
+      );
+    }
     throw new Error(`সার্ভার থেকে খালি উত্তর এসেছে (HTTP ${res.status}) — অনুগ্রহ করে পুনরায় চেষ্টা করুন`);
   }
 

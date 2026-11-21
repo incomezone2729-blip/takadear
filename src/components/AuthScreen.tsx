@@ -18,6 +18,8 @@ import {
 
 interface AuthScreenProps {
   initialRefCode: string;
+  defaultToSignup?: boolean;
+  initialInfoMsg?: string | null;
   referralSettings?: ReferralSettingsConfig;
   onEmailAuth: (params: {
     mode: 'signup' | 'login';
@@ -31,11 +33,15 @@ interface AuthScreenProps {
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialRefCode,
+  defaultToSignup = false,
+  initialInfoMsg = null,
   referralSettings = DEFAULT_REFERRAL_SETTINGS,
   onEmailAuth,
   onPasswordReset,
 }) => {
-  const [mode, setMode] = useState<'login' | 'signup'>(initialRefCode ? 'signup' : 'login');
+  const [mode, setMode] = useState<'login' | 'signup'>(
+    defaultToSignup || initialRefCode ? 'signup' : 'login'
+  );
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -44,7 +50,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [refCode, setRefCode] = useState(initialRefCode);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(initialInfoMsg);
   const [suggestLoginSwitch, setSuggestLoginSwitch] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -286,6 +292,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     placeholder="বন্ধুর কোড থাকলে লিখুন"
                     className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-sm uppercase font-mono-num text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
                   />
+                  {initialRefCode && refCode === initialRefCode && (
+                    <p className="mt-1.5 text-[11px] text-[var(--emerald)] flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>রেফারেল লিংক থেকে কোড স্বয়ংক্রিয়ভাবে যুক্ত হয়েছে</span>
+                    </p>
+                  )}
                 </div>
               </>
             )}

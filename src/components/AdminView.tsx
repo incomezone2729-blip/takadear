@@ -5,9 +5,12 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Globe,
+  Link2,
   LogOut,
   Mail,
   MessageCircle,
+  Phone,
   RefreshCw,
   Save,
   Search,
@@ -38,10 +41,12 @@ import {
 } from '../services/firestoreService';
 import { fetchAdminSecurityStatus, type AdminSecurityStatus } from '../services/secureApi';
 import {
+  buildReferralLink,
   calculateWithdrawalTotal,
   DEFAULT_ACCOUNT_SELL_SETTINGS,
   DEFAULT_REFERRAL_SETTINGS,
   DEFAULT_WITHDRAWAL_SETTINGS,
+  extractUserIdFromRefCode,
   filterAccountSubmissionsByStatus,
   filterAdminTransactions,
   filterUsersByStatusAndQuery,
@@ -136,7 +141,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
       ]);
       setData(dashboardRes);
       setSellForm(dashboardRes.accountSellSettings);
-      setReferralForm(dashboardRes.referralSettings);
+      setReferralForm({
+        ...dashboardRes.referralSettings,
+        referralDomain: dashboardRes.referralSettings.referralDomain || '',
+      });
       setWithdrawalFeeForm(dashboardRes.withdrawalSettings);
       if (secRes) setSecurityStatus(secRes);
     } catch (err) {
@@ -1123,6 +1131,29 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
 
               <div>
+                <label htmlFor="ref-domain-link" className="block text-xs text-[var(--muted)] mb-1">
+                  রেফারেল ডোমেইন লিংক (যেমন: https://takadear.onrender.com)
+                </label>
+                <div className="relative">
+                  <Globe className="w-4 h-4 text-[var(--muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    id="ref-domain-link"
+                    type="text"
+                    maxLength={200}
+                    value={referralForm.referralDomain || ''}
+                    onChange={(e) =>
+                      setReferralForm((prev) => ({ ...prev, referralDomain: e.target.value }))
+                    }
+                    placeholder="ফাঁকা রাখলে বর্তমান ওয়েবসাইটের ডোমেইন ব্যবহার হবে"
+                    className="w-full min-h-[42px] pl-10 pr-3.5 py-2 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-xs font-mono-num focus:outline-none focus:border-[var(--primary)]"
+                  />
+                </div>
+                <p className="text-[11px] text-[var(--muted)] mt-1">
+                  সকল ইউজারের রেফারেল লিংক এই ডোমেইন দিয়ে তৈরি হবে। ফাঁকা রাখলে ওয়েবসাইটের বর্তমান ডোমেইন ব্যবহৃত হবে।
+                </p>
+              </div>
+
+              <div>
                 <label htmlFor="ref-condition-note" className="block text-xs text-[var(--muted)] mb-1">
                   রেফারেলের শর্তের বিবরণ (ইউজারের রেফারেল কার্ডে দেখাবে)
                 </label>
@@ -1139,16 +1170,28 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 />
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--muted)]">
-                প্রিভিউ: বন্ধুকে আমন্ত্রণ জানালে আপনি{' '}
-                <strong className="text-[var(--emerald)] font-mono-num">
-                  ৳{fmtBnReward(referralForm.referrerBonus)}
-                </strong>{' '}
-                পাবেন এবং আপনার বন্ধু{' '}
-                <strong className="text-[var(--primary)] font-mono-num">
-                  ৳{fmtBnReward(referralForm.friendBonus)}
-                </strong>{' '}
-                বোনাস পাবে (শর্ত: ন্যূনতম {toBn(referralForm.minTasks)}টি চেক-ইন/কাজ)।
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--muted)] space-y-1.5">
+                <p>
+                  প্রিভিউ: বন্ধুকে আমন্ত্রণ জানালে আপনি{' '}
+                  <strong className="text-[var(--emerald)] font-mono-num">
+                    ৳{fmtBnReward(referralForm.referrerBonus)}
+                  </strong>{' '}
+                  পাবেন এবং আপনার বন্ধু{' '}
+                  <strong className="text-[var(--primary)] font-mono-num">
+                    ৳{fmtBnReward(referralForm.friendBonus)}
+                  </strong>{' '}
+                  বোনাস পাবে (শর্ত: ন্যূনতম {toBn(referralForm.minTasks)}টি চেক-ইন/কাজ)।
+                </p>
+                <p className="font-mono-num text-[11px] break-all">
+                  নমুনা রেফারেল লিংক:{' '}
+                  <span className="text-[var(--text)] font-semibold">
+                    {buildReferralLink(
+                      'TKD1234',
+                      referralForm.referralDomain,
+                      typeof window !== 'undefined' ? window.location.origin : undefined
+                    )}
+                  </span>
+                </p>
               </div>
             </form>
           </div>
@@ -1163,8 +1206,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="নাম, ইমেইল, রেফারেল কোড বা UID দিয়ে খুঁজুন..."
-                  aria-label="নাম, ইমেইল, রেফারেল কোড বা UID দিয়ে ব্যবহারকারী খুঁজুন"
+                  placeholder="নাম, ইমেইল, ফোন, রেফারেল কোড, রেফার্ড বাই বা UID দিয়ে খুঁজুন..."
+                  aria-label="নাম, ইমেইল, ফোন, রেফারেল কোড, রেফার্ড বাই বা UID দিয়ে ব্যবহারকারী খুঁজুন"
                   className="w-full min-h-[46px] pl-11 pr-4 py-2.5 rounded-2xl bg-[var(--surface)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--primary)]"
                 />
               </div>
@@ -1221,9 +1264,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <p className="text-xs text-[var(--primary)] font-mono-num mt-0.5 flex items-center gap-1.5 truncate">
                         <Mail className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">{u.email || u.emailMasked || 'ইমেইল যুক্ত নেই'}</span>
+                        {u.phone && <span className="text-[var(--muted)] shrink-0">· 📞 {u.phone}</span>}
                       </p>
                       <p className="text-xs text-[var(--muted)] font-mono-num mt-0.5">
-                        কোড: {u.refCode} · ব্যালেন্স: ৳{fmtAmount(u.balance)} · মোট আয়: ৳{fmtAmount(u.totalEarned)}
+                        আইডি: {extractUserIdFromRefCode(u.refCode)} · কোড: {u.refCode} · ব্যালেন্স: ৳{fmtAmount(u.balance)} · মোট আয়: ৳{fmtAmount(u.totalEarned)}
+                      </p>
+                      <p className="text-[11px] text-[var(--muted)] mt-0.5">
+                        যোগদান: {u.createdAtLabel || 'অজানা'}
+                        {u.referredBy ? ` · রেফার্ড বাই: ${u.referredBy}` : ''}
                       </p>
                       {u.suspended && u.suspensionReason && (
                         <p className="text-xs text-[var(--danger)] mt-0.5">
@@ -1784,42 +1832,117 @@ export const AdminView: React.FC<AdminViewProps> = ({
       >
         {selectedUser && (() => {
           const userEmail = selectedUser.email || selectedUser.emailMasked || '';
-          const userPendingWds = withdrawals.filter(
-            (w) => w.userId === selectedUser.uid && w.status === 'প্রসেসিং'
+          const userPhone = selectedUser.phone || '';
+          const userReferralLink = buildReferralLink(
+            selectedUser.refCode,
+            data?.referralSettings.referralDomain,
+            typeof window !== 'undefined' ? window.location.origin : undefined
           );
-          const userPendingSubs = submissions.filter(
-            (s) => s.userId === selectedUser.uid && s.status === 'পেন্ডিং'
-          );
+          const referrerUser = selectedUser.referredBy
+            ? users.find((x) => x.refCode.toUpperCase() === selectedUser.referredBy?.toUpperCase()) || null
+            : null;
+          const userAllWds = withdrawals.filter((w) => w.userId === selectedUser.uid);
+          const userAllSubs = submissions.filter((s) => s.userId === selectedUser.uid);
+          const userPendingWds = userAllWds.filter((w) => w.status === 'প্রসেসিং');
+          const userPendingSubs = userAllSubs.filter((s) => s.status === 'পেন্ডিং');
           return (
             <div className="space-y-4">
-              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-[var(--muted)] flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    <span>অ্যাকাউন্টের ইমেইল</span>
-                  </span>
-                  {userEmail && (
+              <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-2.5">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-[var(--border)]">
+                  <div>
+                    <span className="text-[11px] text-[var(--muted)] block">অ্যাকাউন্টের পূর্ণ নাম</span>
+                    <span className="text-sm font-bold text-[var(--text)]">{selectedUser.name}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(selectedUser.name);
+                      onToast('নাম কপি করা হয়েছে', 'ok');
+                    }}
+                    className="text-[11px] font-semibold text-[var(--primary)] flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>কপি</span>
+                  </button>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-[var(--muted)] flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-[var(--primary)]" />
+                      <span>অ্যাকাউন্টের ইমেইল</span>
+                    </span>
+                    {userEmail && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(userEmail);
+                          onToast('ইমেইল কপি করা হয়েছে', 'ok');
+                        }}
+                        className="text-[11px] font-semibold text-[var(--primary)] flex items-center gap-1 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" />
+                        <span>কপি</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-sm font-bold font-mono-num break-all text-[var(--text)] mt-0.5">
+                    {userEmail || 'ইমেইল পাওয়া যায়নি'}
+                  </p>
+                  {selectedUser.email && selectedUser.emailMasked && (
+                    <p className="text-[11px] text-[var(--muted)] font-mono-num">
+                      মাস্কড: {selectedUser.emailMasked}
+                    </p>
+                  )}
+                </div>
+
+                {userPhone && (
+                  <div className="pt-2 border-t border-[var(--border)] flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[11px] text-[var(--muted)] flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-[var(--emerald)]" />
+                        <span>মোবাইল নম্বর</span>
+                      </span>
+                      <span className="text-sm font-bold font-mono-num text-[var(--text)]">
+                        {userPhone}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
-                        void navigator.clipboard.writeText(userEmail);
-                        onToast('ইমেইল কপি করা হয়েছে', 'ok');
+                        void navigator.clipboard.writeText(userPhone);
+                        onToast('ফোন নম্বর কপি হয়েছে', 'ok');
                       }}
-                      className="text-[11px] font-semibold text-[var(--primary)] flex items-center gap-1 cursor-pointer"
+                      className="text-[11px] font-semibold text-[var(--primary)] flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <Copy className="w-3 h-3" />
                       <span>কপি</span>
                     </button>
-                  )}
-                </div>
-                <p className="text-sm font-bold font-mono-num break-all text-[var(--text)]">
-                  {userEmail || 'ইমেইল পাওয়া যায়নি'}
-                </p>
-                {selectedUser.email && selectedUser.emailMasked && (
-                  <p className="text-[11px] text-[var(--muted)] font-mono-num">
-                    মাস্কড: {selectedUser.emailMasked}
-                  </p>
+                  </div>
                 )}
+
+                <div className="pt-2 border-t border-[var(--border)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-[var(--muted)] flex items-center gap-1">
+                      <Link2 className="w-3 h-3 text-[var(--emerald)]" />
+                      <span>নিজস্ব রেফারেল লিংক</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(userReferralLink);
+                        onToast('রেফারেল লিংক কপি হয়েছে', 'ok');
+                      }}
+                      className="text-[11px] font-semibold text-[var(--primary)] flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>কপি</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] font-mono-num break-all text-[var(--text)] mt-0.5">
+                    {userReferralLink}
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2 text-sm">
@@ -1858,21 +1981,47 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 </div>
                 <p className="flex justify-between">
-                  <span className="text-[var(--muted)]">ভূমিকা</span>
-                  <span className="font-semibold">
-                    {selectedUser.role === 'admin' ? 'অ্যাডমিন' : 'সাধারণ ব্যবহারকারী'}
+                  <span className="text-[var(--muted)]">ভূমিকা ও থিম</span>
+                  <span className="font-semibold text-xs">
+                    {selectedUser.role === 'admin' ? 'অ্যাডমিন' : 'সাধারণ ব্যবহারকারী'} ·{' '}
+                    {selectedUser.theme === 'dark' ? 'ডার্ক মোড' : 'লাইট মোড'}
+                  </span>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-[var(--muted)]">ইউজার আইডি</span>
+                  <span className="font-mono-num font-bold text-[var(--primary)]">
+                    {extractUserIdFromRefCode(selectedUser.refCode)}
                   </span>
                 </p>
                 <p className="flex justify-between">
                   <span className="text-[var(--muted)]">রেফারেল কোড</span>
                   <span className="font-mono-num font-bold">{selectedUser.refCode}</span>
                 </p>
-                {selectedUser.referredBy && (
-                  <p className="flex justify-between">
-                    <span className="text-[var(--muted)]">রেফারড বাই</span>
-                    <span className="font-mono-num text-xs">{selectedUser.referredBy}</span>
-                  </p>
-                )}
+                <p className="flex justify-between gap-2">
+                  <span className="text-[var(--muted)] shrink-0">কার রেফারে এসেছে</span>
+                  <span className="font-mono-num text-xs text-right">
+                    {selectedUser.referredBy ? (
+                      <>
+                        {selectedUser.referredBy}
+                        {referrerUser ? ` (${referrerUser.name})` : ''}
+                      </>
+                    ) : (
+                      'সরাসরি রেজিস্ট্রেশন'
+                    )}
+                  </span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-[var(--muted)] shrink-0">অ্যাকাউন্ট খোলার সময়</span>
+                  <span className="font-mono-num text-xs text-right">
+                    {selectedUser.createdAtLabel || 'অজানা'}
+                  </span>
+                </p>
+                <p className="flex justify-between gap-2">
+                  <span className="text-[var(--muted)] shrink-0">সর্বশেষ আপডেট</span>
+                  <span className="font-mono-num text-xs text-right">
+                    {selectedUser.updatedAtLabel || 'অজানা'}
+                  </span>
+                </p>
                 <p className="flex justify-between">
                   <span className="text-[var(--muted)]">বর্তমান ব্যালেন্স</span>
                   <span className="font-mono-num font-bold text-[var(--emerald)]">
@@ -1890,9 +2039,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </span>
                 </p>
                 <p className="flex justify-between">
-                  <span className="text-[var(--muted)]">রেফারেল ও স্ট্রিক</span>
+                  <span className="text-[var(--muted)]">রেফারেল, আয় ও স্ট্রিক</span>
                   <span className="font-mono-num text-xs">
-                    {toBn(selectedUser.referrals)} জন · {toBn(selectedUser.streakCount)} দিন
+                    {toBn(selectedUser.referrals)} জন (৳{fmtAmount(selectedUser.refEarned || 0)}) · {toBn(selectedUser.streakCount)} দিন
                   </span>
                 </p>
               </div>
@@ -1927,6 +2076,69 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         অ্যাকাউন্ট সেল ({toBn(userPendingSubs.length)}) দেখুন ›
                       </button>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {userAllWds.length > 0 && (
+                <div className="pt-2 border-t border-[var(--border)] space-y-2">
+                  <p className="text-xs font-bold text-[var(--muted)]">
+                    উইথড্র ইতিহাস ({toBn(userAllWds.length)})
+                  </p>
+                  <div className="rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] divide-y divide-[var(--border)]">
+                    {userAllWds.slice(0, 5).map((w) => {
+                      const decrypted = decryptedNumbers[w.id];
+                      return (
+                        <div key={w.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold font-mono-num truncate">
+                              {w.method} · {decrypted || w.maskedNumber}
+                            </p>
+                            <p className="text-[11px] text-[var(--muted)] truncate">
+                              {w.dateLabel} · {w.status}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!decrypted && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDecryptNumber(w.id, w.encryptedAccount, w.userId)}
+                                className="px-2 py-1 rounded-md bg-[var(--surface)] border border-[var(--border)] text-[10px] font-semibold cursor-pointer"
+                              >
+                                ডিক্রিপ্ট
+                              </button>
+                            )}
+                            <span className="font-mono-num font-bold">৳{fmtAmount(w.amount)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {userAllSubs.length > 0 && (
+                <div className="pt-2 border-t border-[var(--border)] space-y-2">
+                  <p className="text-xs font-bold text-[var(--muted)]">
+                    অ্যাকাউন্ট সেল সাবমিশন ({toBn(userAllSubs.length)})
+                  </p>
+                  <div className="rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] divide-y divide-[var(--border)]">
+                    {userAllSubs.slice(0, 5).map((s) => (
+                      <div key={s.id} className="px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-semibold truncate">
+                            {s.platform === 'gmail' ? 'জিমেইল' : 'ফেসবুক'} ·{' '}
+                            <span className="font-mono-num">{s.maskedIdentifier}</span>
+                          </p>
+                          <p className="text-[11px] text-[var(--muted)] truncate">
+                            {s.dateLabel} · {s.status}
+                          </p>
+                        </div>
+                        <span className="font-mono-num font-bold text-[var(--emerald)] shrink-0">
+                          ৳{fmtAmount(s.amount)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

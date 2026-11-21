@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {
   addMoney,
   analyzeLegacyUserAccount,
+  buildPasswordResetUrl,
+  buildReferralLink,
+  buildReferralShareMessage,
   calculateNextStreak,
   calculateUserLevel,
   calculateWithdrawalFee,
@@ -13,6 +16,7 @@ import {
   DEFAULT_REFERRAL_SETTINGS,
   DEFAULT_WITHDRAWAL_SETTINGS,
   deriveDisplayName,
+  extractUserIdFromRefCode,
   filterAccountSubmissionsByPlatform,
   filterAccountSubmissionsByStatus,
   filterAdminTransactions,
@@ -24,14 +28,21 @@ import {
   FRIEND_REFERRAL_BONUS,
   fromPaisa,
   generateEasyPassword,
+  generateRandomTkdRefCode,
   generateRefCode,
   getActiveStreakDisplay,
   isAdminEmail,
+  isPasswordResetReturnPath,
   isReferralQualified,
+  isTkdRefCode,
   maskAccountIdentifier,
   maskEmail,
   maskPhoneNumber,
   normalizeDailyCounters,
+  normalizeReferralDomain,
+  parseAuthActionFromUrl,
+  parseReferralEntryFromUrl,
+  PUBLIC_APP_ORIGIN,
   REFERRAL_BONUS,
   REFERRAL_MIN_TASKS,
   roundMoney,
@@ -77,8 +88,83 @@ test('Bengali numeral formatting and amount formatting', () => {
   assert.equal(fmtBnReward(2), '২');
 });
 
-test('Referral code generation and exclusive admin email checks', () => {
-  assert.equal(generateRefCode('rahim@gmail.com', 'abc123xyz9'), 'TKRAHXYZ9');
+test('Referral code generation (TKD4-digit), referral link format, /register URL parsing, and exclusive admin email checks', () => {
+  const code = generateRefCode('rahim@gmail.com', 'abc123xyz9');
+  assert.match(code, /^TKD\d{4}$/);
+  assert.equal(generateRefCode('rahim@gmail.com', 'abc123xyz9'), code);
+  assert.equal(isTkdRefCode(code), true);
+  assert.equal(isTkdRefCode('TKRAHXYZ9'), false);
+  assert.equal(extractUserIdFromRefCode('TKD4821'), '4821');
+  assert.equal(extractUserIdFromRefCode('TKRAHXYZ9'), 'TKRAHXYZ9');
+
+  const randomCode = generateRandomTkdRefCode();
+  assert.match(randomCode, /^TKD\d{4}$/);
+
+  assert.equal(PUBLIC_APP_ORIGIN, 'https://takadear.onrender.com');
+  assert.equal(normalizeReferralDomain('takadear.onrender.com/'), 'https://takadear.onrender.com');
+  assert.equal(normalizeReferralDomain(''), '');
+  assert.equal(
+    buildReferralLink(code),
+    `https://takadear.onrender.com/register?ref=${code}`
+  );
+  assert.equal(
+    buildReferralLink(` ${code.toLowerCase()} `, 'https://custom.example.com/path'),
+    `https://custom.example.com/register?ref=${code}`
+  );
+  assert.equal(
+    buildReferralLink('TKD1234', '', 'https://takadear.onrender.com'),
+    'https://takadear.onrender.com/register?ref=TKD1234'
+  );
+
+  assert.deepEqual(parseReferralEntryFromUrl('/register', '?ref=tkd4821'), {
+    initialRefCode: 'TKD4821',
+    defaultToSignup: true,
+  });
+  assert.deepEqual(parseReferralEntryFromUrl('/register', ''), {
+    initialRefCode: '',
+    defaultToSignup: true,
+  });
+  assert.deepEqual(parseReferralEntryFromUrl('/', '?ref=TKD1234'), {
+    initialRefCode: 'TKD1234',
+    defaultToSignup: true,
+  });
+  assert.deepEqual(parseReferralEntryFromUrl('/', ''), {
+    initialRefCode: '',
+    defaultToSignup: false,
+  });
+
+  const shareMsg = buildReferralShareMessage(code, 2, 1);
+  assert.ok(shareMsg.includes(code));
+  assert.ok(shareMsg.includes(`https://takadear.onrender.com/register?ref=${code}`));
+
+  assert.equal(
+    buildPasswordResetUrl('', PUBLIC_APP_ORIGIN),
+    'https://takadear.onrender.com/reset-password'
+  );
+  assert.equal(
+    buildPasswordResetUrl('takadear.onrender.com/extra'),
+    'https://takadear.onrender.com/reset-password'
+  );
+  assert.deepEqual(
+    parseAuthActionFromUrl('?mode=resetPassword&oobCode=ABC123xyz&apiKey=test'),
+    { mode: 'resetPassword', oobCode: 'ABC123xyz' }
+  );
+  assert.deepEqual(parseAuthActionFromUrl('?mode=verifyEmail&oobCode=ABC'), {
+    mode: null,
+    oobCode: '',
+  });
+  assert.deepEqual(parseAuthActionFromUrl('?mode=resetPassword'), {
+    mode: null,
+    oobCode: '',
+  });
+  assert.equal(isPasswordResetReturnPath('/reset-password', ''), true);
+  assert.equal(isPasswordResetReturnPath('/reset-password/', '?lang=en'), true);
+  assert.equal(
+    isPasswordResetReturnPath('/reset-password', '?mode=resetPassword&oobCode=ABC'),
+    false
+  );
+  assert.equal(isPasswordResetReturnPath('/', ''), false);
+
   assert.equal(isAdminEmail('incomezone2729@gmail.com'), true);
   assert.equal(isAdminEmail('INCOMEZONE2729@GMAIL.COM'), true);
   assert.equal(isAdminEmail('ahtaskpay@gmail.com'), false);

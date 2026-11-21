@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Moon, Sun, Shield, LogOut, Lock } from 'lucide-react';
+import { Moon, Sun, Shield, LogOut, Lock } from 'lucide-react';
 import type {
   InviteeReferralStatus,
   UserAccount,
@@ -13,6 +13,7 @@ import {
   toBn,
 } from '../utils/takadearLogic';
 import { Modal } from './Modal';
+import { ReferralShareBox } from './ReferralShareBox';
 
 interface ProfileViewProps {
   account: UserAccount;
@@ -43,15 +44,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 }) => {
   const [logoutModal, setLogoutModal] = useState(false);
 
-  const handleCopyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(account.refCode);
-      onToast('রেফারেল কোড কপি হয়েছে', 'ok');
-    } catch {
-      onToast('কপি করা যায়নি', 'err');
-    }
-  };
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       <section className="lg:col-span-5 rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-6 text-center">
@@ -80,7 +72,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <div className="lg:col-span-7 space-y-5">
         <section className="rounded-3xl bg-[var(--surface)] border border-[var(--border)] p-5 sm:p-6 space-y-4">
           <div>
-            <h3 className="text-base font-bold">রেফারেল কোড ও বোনাস</h3>
+            <h3 className="text-base font-bold">রেফারেল কোড, লিংক ও বোনাস</h3>
             <p className="text-xs sm:text-sm text-[var(--text)] mt-1.5 leading-relaxed">
               বন্ধুকে আমন্ত্রণ জানালে আপনি{' '}
               <strong className="text-[var(--emerald)] font-mono-num">
@@ -94,26 +86,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-[var(--surface-2)] border border-dashed border-[var(--primary)]/50">
-            <code className="text-lg font-bold font-mono-num tracking-widest text-[var(--primary)]">
-              {account.refCode}
-            </code>
-            <button
-              type="button"
-              onClick={handleCopyCode}
-              className="min-h-[40px] px-4 py-2 rounded-xl bg-[var(--primary)] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>কোড কপি</span>
-            </button>
-          </div>
+          <ReferralShareBox
+            refCode={account.refCode}
+            referrerBonus={referralSettings.referrerBonus}
+            friendBonus={referralSettings.friendBonus}
+            referralDomain={referralSettings.referralDomain}
+            onToast={onToast}
+          />
 
           <div className="p-3.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
             <p className="text-xs font-bold text-[var(--text)]">রেফারেলের শর্তাবলি:</p>
             <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--muted)] leading-relaxed">
               <li>
-                বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফার কোড (
-                <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong>) ব্যবহার করতে হবে।
+                বন্ধুকে আপনার রেফার লিংকে গিয়ে অথবা রেফার কোড (
+                <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong>) ব্যবহার করে রেজিস্ট্রেশন করতে হবে।
               </li>
               <li>
                 {referralSettings.minTasks > 0

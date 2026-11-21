@@ -17,6 +17,7 @@ import {
 } from '../utils/takadearLogic';
 import { Modal } from './Modal';
 import { FacebookLogo } from './FacebookLogo';
+import { ReferralShareBox } from './ReferralShareBox';
 
 interface TasksViewProps {
   account: UserAccount;
@@ -291,7 +292,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           onClick={() => setInviteOpen(true)}
           className="min-h-[40px] px-4 py-2 rounded-xl bg-[var(--primary)] hover:opacity-95 text-white text-xs font-semibold transition-opacity cursor-pointer whitespace-nowrap shrink-0"
         >
-          রেফার কোড ও শর্ত দেখুন
+          রেফার লিংক ও কোড দেখুন
         </button>
       </section>
 
@@ -421,29 +422,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
           </div>
 
-          <div>
-            <p className="text-xs text-[var(--muted)] mb-1.5">আপনার রেফারেল কোড</p>
-            <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-[var(--surface-2)] border border-dashed border-[var(--primary)]/50">
-              <code className="text-base font-bold font-mono-num tracking-widest text-[var(--primary)]">
-                {account.refCode}
-              </code>
-              <button
-                type="button"
-                onClick={() => void copyText(account.refCode, 'রেফারেল কোড')}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[var(--primary)] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                <span>কোড কপি</span>
-              </button>
-            </div>
-          </div>
+          <ReferralShareBox
+            refCode={account.refCode}
+            referrerBonus={referralSettings.referrerBonus}
+            friendBonus={referralSettings.friendBonus}
+            referralDomain={referralSettings.referralDomain}
+            onToast={onToast}
+          />
 
           <div className="p-3.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
             <p className="text-xs font-bold text-[var(--text)]">রেফারেলের শর্তাবলি:</p>
             <ol className="list-decimal list-inside space-y-1 text-xs text-[var(--muted)] leading-relaxed">
               <li>
-                রেজিস্ট্রেশনের সময় আপনার বন্ধুকে রেফার কোডের ঘরে{' '}
-                <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong> লিখতে হবে।
+                আপনার বন্ধুকে আপনার রেফার লিংক থেকে অথবা রেফার কোড{' '}
+                <strong className="font-mono-num text-[var(--text)]">{account.refCode}</strong> ব্যবহার করে রেজিস্ট্রেশন করতে হবে।
               </li>
               <li>
                 {referralSettings.minTasks > 0

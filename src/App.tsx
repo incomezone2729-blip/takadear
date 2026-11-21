@@ -57,6 +57,7 @@ import {
   type WithdrawalRecord,
 } from './services/firestoreService';
 import {
+  buildPasswordResetUrl,
   calculateUserLevel,
   DEFAULT_ACCOUNT_SELL_SETTINGS,
   DEFAULT_REFERRAL_SETTINGS,
@@ -65,6 +66,10 @@ import {
   fmtBnReward,
   formatAppErrorMessage,
   isAdminEmail,
+  isPasswordResetReturnPath,
+  parseAuthActionFromUrl,
+  parseReferralEntryFromUrl,
+  PUBLIC_APP_ORIGIN,
   toBn,
   type AccountPlatform,
   type AccountSellSettingsConfig,
@@ -75,6 +80,7 @@ import {
 } from './utils/takadearLogic';
 import { AuthScreen } from './components/AuthScreen';
 import { EmailVerificationScreen } from './components/EmailVerificationScreen';
+import { PasswordResetScreen } from './components/PasswordResetScreen';
 import { HomeView, type NavPage } from './components/HomeView';
 import { TasksView } from './components/TasksView';
 import { WalletView } from './components/WalletView';
@@ -156,7 +162,18 @@ export default function App() {
   const accountRef = useRef<UserAccount | null>(null);
   accountRef.current = account;
 
-  const initialRefCode = new URLSearchParams(window.location.search).get('ref')?.toUpperCase() || '';
+  const { initialRefCode, defaultToSignup } = parseReferralEntryFromUrl(
+    window.location.pathname,
+    window.location.search
+  );
+  const [resetOobCode, setResetOobCode] = useState<string>(
+    () => parseAuthActionFromUrl(window.location.search).oobCode
+  );
+  const [resetReturnInfo] = useState<string | null>(() =>
+    isPasswordResetReturnPath(window.location.pathname, window.location.search)
+      ? 'পাসওয়ার্ড রিসেট সম্পন্ন হয়ে থাকলে আপনার নতুন পাসওয়ার্ড দিয়ে লগইন করুন।'
+      : null
+  );
 
   const showToast = useCallback((message: string, variant: ToastVariant = 'default') => {
     setToastState({ message, variant });
@@ -186,6 +203,15 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [page]);
+
+  // Scrub sensitive reset query params (apiKey, oobCode) from browser URL bar immediately
+  useEffect(() => {
+    if (resetOobCode && window.location.search) {
+      window.history.replaceState({}, '', '/reset-password');
+    } else if (resetReturnInfo) {
+      window.history.replaceState({}, '', '/');
+    }
+  }, [resetOobCode, resetReturnInfo]);
 
   // Connection & health probes on boot
   useEffect(() => {
@@ -438,10 +464,51 @@ export default function App() {
   };
 
   const handlePasswordReset = async (email: string) => {
+    const targetResetUrl = buildPasswordResetUrl(
+      referralSettings.referralDomain,
+      PUBLIC_APP_ORIGIN
+    );
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, email, {
+        url: targetResetUrl,
+        handleCodeInApp: true,
+      });
       showToast('পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে', 'ok');
     } catch (err) {
+      const code = (err as { code?: string })?.code || '';
+      if (
+        code === 'auth/unauthorized-continue-uri' ||
+        code === 'auth/invalid-continue-uri'
+      ) {
+        const originResetUrl = buildPasswordResetUrl(null, window.location.origin);
+        try {
+          if (originResetUrl !== targetResetUrl) {
+            await sendPasswordResetEmail(auth, email, {
+              url: originResetUrl,
+              handleCodeInApp: true,
+            });
+          } else {
+            await sendPasswordResetEmail(auth, email);
+          }
+          showToast('পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে', 'ok');
+          return;
+        } catch (fallbackErr) {
+          const fallbackCode = (fallbackErr as { code?: string })?.code || '';
+          if (
+            fallbackCode === 'auth/unauthorized-continue-uri' ||
+            fallbackCode === 'auth/invalid-continue-uri'
+          ) {
+            try {
+              await sendPasswordResetEmail(auth, email);
+              showToast('পাসওয়ার্ড রিসেট ইমেইল পাঠানো হয়েছে', 'ok');
+              return;
+            } catch (plainErr) {
+              throw new Error(mapAuthErrorToBn(plainErr));
+            }
+          }
+          throw new Error(mapAuthErrorToBn(fallbackErr));
+        }
+      }
       throw new Error(mapAuthErrorToBn(err));
     }
   };
@@ -530,11 +597,31 @@ export default function App() {
     );
   }
 
+  if (resetOobCode) {
+    return (
+      <>
+        <PasswordResetScreen
+          oobCode={resetOobCode}
+          onDone={() => {
+            setResetOobCode('');
+            if (window.location.pathname !== '/' || window.location.search) {
+              window.history.replaceState({}, '', '/');
+            }
+          }}
+          onToast={showToast}
+        />
+        <Toast message={toastState.message} variant={toastState.variant} />
+      </>
+    );
+  }
+
   if (!firebaseUser) {
     return (
       <>
         <AuthScreen
           initialRefCode={initialRefCode}
+          defaultToSignup={defaultToSignup}
+          initialInfoMsg={resetReturnInfo}
           referralSettings={referralSettings}
           onEmailAuth={handleEmailAuth}
           onPasswordReset={handlePasswordReset}

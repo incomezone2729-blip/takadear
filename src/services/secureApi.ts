@@ -7,15 +7,6 @@ import {
 
 export interface ApiHealthResponse {
   status: string;
-  projectId: string;
-  firestoreDatabaseId: string;
-  authDomain: string;
-  storageBucket: string;
-  androidPackageName: string;
-  androidAppId: string;
-  webAppId: string;
-  encryption: string;
-  authVerification: string;
   timestamp: number;
 }
 

@@ -34,11 +34,14 @@ import {
   deriveDisplayName,
   fmtAmount,
   formatBnDate,
+  generateRandomTkdRefCode,
   generateRefCode,
   isReferralQualified,
+  isTkdRefCode,
   maskAccountIdentifier,
   maskEmail,
   normalizeDailyCounters,
+  normalizeReferralDomain,
   REFERRAL_BONUS,
   roundMoney,
   sortSupportThreads,
@@ -90,6 +93,11 @@ export interface UserAccount {
   // Runtime-hydrated display fields for verified Admin Dashboard only (stored isolated in private/vault)
   email?: string | null;
   emailMasked?: string | null;
+  phone?: string | null;
+  createdAtMs?: number;
+  updatedAtMs?: number;
+  createdAtLabel?: string;
+  updatedAtLabel?: string;
 }
 
 export interface UserPrivateVault {
@@ -400,6 +408,29 @@ async function repairLegacyUserDocIfNeeded(
   return repairedAccount;
 }
 
+async function allocateUniqueTkdRefCode(
+  uid: string,
+  email: string
+): Promise<{ refCode: string; shouldCreateRefCodeDoc: boolean }> {
+  const initialCandidate = generateRefCode(email, uid);
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const candidate = attempt === 0 ? initialCandidate : generateRandomTkdRefCode();
+    try {
+      const existingCodeSnap = await getDocFromServer(doc(db, 'referralCodes', candidate));
+      if (!existingCodeSnap.exists()) {
+        return { refCode: candidate, shouldCreateRefCodeDoc: true };
+      }
+      const existingOwner = (existingCodeSnap.data() as { ownerId?: string })?.ownerId;
+      if (existingOwner === uid) {
+        return { refCode: candidate, shouldCreateRefCodeDoc: false };
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error('রেফারেল কোড যাচাই করতে সমস্যা হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন');
+}
+
 export async function ensureUserAccount(
   user: User,
   options?: { displayName?: string; referredBy?: string }
@@ -434,6 +465,28 @@ export async function ensureUserAccount(
         }
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+      }
+
+      if (!isTkdRefCode(currentAccount.refCode) && !currentAccount.suspended) {
+        try {
+          const allocated = await allocateUniqueTkdRefCode(user.uid, resolvedEmail);
+          const upgradeBatch = writeBatch(db);
+          upgradeBatch.update(userRef, {
+            refCode: allocated.refCode,
+            updatedAt: serverTimestamp(),
+          });
+          if (allocated.shouldCreateRefCodeDoc) {
+            upgradeBatch.set(doc(db, 'referralCodes', allocated.refCode), {
+              refCode: allocated.refCode,
+              ownerId: user.uid,
+              createdAt: serverTimestamp(),
+            });
+          }
+          await upgradeBatch.commit();
+          currentAccount = { ...currentAccount, refCode: allocated.refCode };
+        } catch {
+          // Keep existing account usable if TKD upgrade encounters transient connectivity issues
+        }
       }
 
       if (currentAccount.dailyDate !== today) {
@@ -488,42 +541,7 @@ export async function ensureUserAccount(
     // Create new account cleanly (moved inside queued init)
     const email = resolvedEmail;
     const cleanName = deriveDisplayName(email, fallbackName);
-    let refCode = generateRefCode(email, user.uid);
-    let shouldCreateRefCodeDoc = false;
-    let refCodeVerified = false;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const suffix = Math.random()
-        .toString(36)
-        .slice(2, 6)
-        .toUpperCase()
-        .replace(/[^A-Z0-9]/g, 'X')
-        .padEnd(4, 'X');
-      const candidate =
-        attempt === 0
-          ? refCode
-          : `${refCode.slice(0, 18)}${suffix}`.slice(0, 24);
-      try {
-        const existingCodeSnap = await getDocFromServer(doc(db, 'referralCodes', candidate));
-        if (!existingCodeSnap.exists()) {
-          refCode = candidate;
-          shouldCreateRefCodeDoc = true;
-          refCodeVerified = true;
-          break;
-        }
-        const existingOwner = (existingCodeSnap.data() as { ownerId?: string })?.ownerId;
-        if (existingOwner === user.uid) {
-          refCode = candidate;
-          shouldCreateRefCodeDoc = false;
-          refCodeVerified = true;
-          break;
-        }
-      } catch {
-        continue;
-      }
-    }
-    if (!refCodeVerified) {
-      throw new Error('রেফারেল কোড যাচাই করতে সমস্যা হয়েছে, অনুগ্রহ করে আবার চেষ্টা করুন');
-    }
+    const { refCode, shouldCreateRefCodeDoc } = await allocateUniqueTkdRefCode(user.uid, email);
 
     const enteredRef = options?.referredBy?.trim().toUpperCase() || null;
 
@@ -1330,6 +1348,10 @@ function parseReferralSettings(d?: Record<string, unknown> | null): ReferralSett
       typeof d.conditionNote === 'string' && d.conditionNote.trim()
         ? d.conditionNote.trim().slice(0, 300)
         : DEFAULT_REFERRAL_SETTINGS.conditionNote,
+    referralDomain:
+      typeof d.referralDomain === 'string'
+        ? normalizeReferralDomain(d.referralDomain).slice(0, 200)
+        : '',
   };
 }
 
@@ -1373,6 +1395,7 @@ export async function adminSaveReferralSettings(
       friendBonus: roundMoney(Number(settings.friendBonus)),
       minTasks: Math.round(Number(settings.minTasks)),
       conditionNote: (settings.conditionNote || '').trim().slice(0, 300),
+      referralDomain: normalizeReferralDomain(settings.referralDomain).slice(0, 200),
       updatedAt: serverTimestamp(),
     });
   } catch (err) {
@@ -1589,22 +1612,40 @@ export async function fetchAdminDashboardData(): Promise<AdminDashboardData> {
       if (v.encryptedEmail) {
         decryptQueue.push({ id: uid, encrypted: String(v.encryptedEmail) });
       }
+      if (v.encryptedPhone) {
+        decryptQueue.push({ id: `phone:${uid}`, encrypted: String(v.encryptedPhone) });
+      }
     });
 
-    let decryptedEmailMap: Record<string, string | null> = {};
+    const decryptedMap: Record<string, string | null> = {};
     if (decryptQueue.length > 0) {
-      try {
-        decryptedEmailMap = await decryptBatchOnServer(decryptQueue);
-      } catch {
-        decryptedEmailMap = {};
+      for (let i = 0; i < decryptQueue.length; i += 300) {
+        const chunk = decryptQueue.slice(i, i + 300);
+        try {
+          const chunkResults = await decryptBatchOnServer(chunk);
+          Object.assign(decryptedMap, chunkResults);
+        } catch {
+          // Preserve partial results if a batch fails
+        }
       }
     }
 
-    const users: UserAccount[] = rawUsers.map((u) => ({
-      ...u,
-      email: decryptedEmailMap[u.uid] || null,
-      emailMasked: maskedByUid.get(u.uid) || null,
-    }));
+    const users: UserAccount[] = rawUsers
+      .map((u) => {
+        const createdAtMs = u.createdAt ? timestampToMs(u.createdAt) : 0;
+        const updatedAtMs = u.updatedAt ? timestampToMs(u.updatedAt) : 0;
+        return {
+          ...u,
+          email: decryptedMap[u.uid] || null,
+          emailMasked: maskedByUid.get(u.uid) || null,
+          phone: decryptedMap[`phone:${u.uid}`] || null,
+          createdAtMs,
+          updatedAtMs,
+          createdAtLabel: createdAtMs ? formatBnDate(new Date(createdAtMs)) : 'অজানা',
+          updatedAtLabel: updatedAtMs ? formatBnDate(new Date(updatedAtMs)) : 'অজানা',
+        };
+      })
+      .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
     const withdrawals = wdSnap.docs
       .map((d) => {
         const data = d.data();

@@ -89,29 +89,22 @@ async function requireFirebaseAuth(
 
 async function createServer() {
   const app = express();
+  app.set('trust proxy', 1);
 
   // CORS & security headers for API responses (handles Render split-origin and OPTIONS preflight cleanly)
   app.use('/api', (_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     next();
   });
   app.use('/api', buildCorsMiddleware());
   app.use(express.json({ limit: '128kb' }));
 
-  // 1. Public health & connection configuration summary (no secrets exposed)
+  // 1. Minimal public health endpoint (internal Firebase IDs & crypto config stay admin-only)
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'ok',
-      projectId: firebaseConfig.projectId,
-      firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
-      authDomain: firebaseConfig.authDomain,
-      storageBucket: firebaseConfig.storageBucket,
-      androidPackageName: 'com.takadear.app',
-      androidAppId: '1:1093271639955:android:4461d25db3bbe0456c7a66',
-      webAppId: firebaseConfig.appId,
-      encryption: 'AES-256-GCM',
-      authVerification: 'Firebase-RS256-X509',
       timestamp: Date.now(),
     });
   });

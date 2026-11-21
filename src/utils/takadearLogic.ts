@@ -32,6 +32,7 @@ export interface ReferralSettingsConfig {
   friendBonus: number;
   minTasks: number;
   conditionNote: string;
+  referralDomain?: string;
 }
 
 export const DEFAULT_REFERRAL_SETTINGS: ReferralSettingsConfig = {
@@ -40,6 +41,7 @@ export const DEFAULT_REFERRAL_SETTINGS: ReferralSettingsConfig = {
   minTasks: REFERRAL_MIN_TASKS,
   conditionNote:
     'বন্ধুকে রেজিস্ট্রেশনের সময় আপনার রেফারেল কোড ব্যবহার করে ন্যূনতম দৈনিক চেক-ইন বা কাজ সম্পন্ন করতে হবে।',
+  referralDomain: '',
 };
 
 const BN_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
@@ -213,10 +215,112 @@ export function isAdminEmail(email?: string | null): boolean {
   return (ADMIN_EMAILS as readonly string[]).includes(normalized);
 }
 
+export const PUBLIC_APP_ORIGIN = 'https://takadear.onrender.com';
+
+export function isTkdRefCode(refCode?: string | null): boolean {
+  return /^TKD\d{4}$/.test((refCode || '').trim().toUpperCase());
+}
+
+export function extractUserIdFromRefCode(refCode?: string | null): string {
+  const clean = (refCode || '').trim().toUpperCase();
+  const match = clean.match(/^TKD(\d{4})$/);
+  if (match) return match[1];
+  return clean || '—';
+}
+
+export function generateRandomTkdRefCode(): string {
+  const num = Math.floor(Math.random() * 10000);
+  return `TKD${String(num).padStart(4, '0')}`;
+}
+
 export function generateRefCode(email: string, uid: string): string {
-  const cleanPrefix = email.replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'X');
-  const cleanUid = uid.replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase().padStart(4, '0');
-  return `TK${cleanPrefix}${cleanUid}`;
+  const seed = `${uid.trim()}|${email.trim().toLowerCase()}`;
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const digits = String((hash >>> 0) % 10000).padStart(4, '0');
+  return `TKD${digits}`;
+}
+
+export function normalizeReferralDomain(domain?: string | null): string {
+  const trimmed = (domain || '').trim();
+  if (!trimmed) return '';
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    return parsed.origin.replace(/\/+$/, '');
+  } catch {
+    return trimmed.replace(/\/+$/, '').slice(0, 200);
+  }
+}
+
+export function buildReferralLink(
+  refCode: string,
+  referralDomain?: string | null,
+  fallbackOrigin: string = PUBLIC_APP_ORIGIN
+): string {
+  const normalizedCustom = normalizeReferralDomain(referralDomain);
+  const normalizedFallback = normalizeReferralDomain(fallbackOrigin) || PUBLIC_APP_ORIGIN;
+  const cleanOrigin = normalizedCustom || normalizedFallback;
+  const cleanCode = refCode.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24);
+  return `${cleanOrigin}/register?ref=${encodeURIComponent(cleanCode)}`;
+}
+
+export function parseReferralEntryFromUrl(
+  pathname: string,
+  search: string
+): { initialRefCode: string; defaultToSignup: boolean } {
+  const params = new URLSearchParams(search || '');
+  const rawRef = (params.get('ref') || '').trim().toUpperCase();
+  const initialRefCode = rawRef.replace(/[^A-Z0-9_-]/g, '').slice(0, 24);
+  const cleanPath = (pathname || '/').replace(/\/+$/, '').toLowerCase();
+  const defaultToSignup =
+    Boolean(initialRefCode) || cleanPath === '/register' || cleanPath === '/signup';
+  return { initialRefCode, defaultToSignup };
+}
+
+export function buildPasswordResetUrl(
+  referralDomain?: string | null,
+  fallbackOrigin: string = PUBLIC_APP_ORIGIN
+): string {
+  const normalizedCustom = normalizeReferralDomain(referralDomain);
+  const normalizedFallback = normalizeReferralDomain(fallbackOrigin) || PUBLIC_APP_ORIGIN;
+  const cleanOrigin = normalizedCustom || normalizedFallback;
+  return `${cleanOrigin}/reset-password`;
+}
+
+export function parseAuthActionFromUrl(
+  search: string
+): { mode: 'resetPassword' | null; oobCode: string } {
+  const params = new URLSearchParams(search || '');
+  const mode = params.get('mode') === 'resetPassword' ? 'resetPassword' : null;
+  const oobCode = (params.get('oobCode') || '').trim();
+  if (mode !== 'resetPassword' || !oobCode) {
+    return { mode: null, oobCode: '' };
+  }
+  return { mode: 'resetPassword', oobCode };
+}
+
+export function isPasswordResetReturnPath(pathname: string, search: string): boolean {
+  const cleanPath = (pathname || '/').replace(/\/+$/, '').toLowerCase();
+  return cleanPath === '/reset-password' && !parseAuthActionFromUrl(search).oobCode;
+}
+
+export function buildReferralShareMessage(
+  refCode: string,
+  referrerBonus: number,
+  friendBonus: number,
+  referralDomain?: string | null
+): string {
+  const link = buildReferralLink(refCode, referralDomain, PUBLIC_APP_ORIGIN);
+  return (
+    `টাকাডিয়ারে (TakaDear) যোগ দিন এবং আয় শুরু করুন! ` +
+    `আমার রেফার লিংক থেকে রেজিস্ট্রেশন করলে আপনি ৳${fmtBnReward(friendBonus)} স্বাগত বোনাস পাবেন (আমিও পাব ৳${fmtBnReward(referrerBonus)})।\n` +
+    `রেফার কোড: ${refCode.trim().toUpperCase()}\n` +
+    `রেফার লিংক: ${link}`
+  );
 }
 
 export function validateEmail(email: string): string | null {
@@ -610,6 +714,21 @@ export function validateReferralSettings(settings: ReferralSettingsConfig): stri
   }
   if ((settings.conditionNote || '').trim().length > 300) {
     return 'শর্তের বিবরণ সর্বোচ্চ ৩০০ অক্ষরের হতে পারে';
+  }
+  const domain = (settings.referralDomain || '').trim();
+  if (domain.length > 200) {
+    return 'রেফারেল ডোমেইন সর্বোচ্চ ২০০ অক্ষরের হতে পারে';
+  }
+  if (domain) {
+    const withProtocol = /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
+    try {
+      const parsed = new URL(withProtocol);
+      if (!parsed.hostname || (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost')) {
+        return 'সঠিক রেফারেল ডোমেইন দিন (যেমন: https://takadear.onrender.com)';
+      }
+    } catch {
+      return 'সঠিক রেফারেল ডোমেইন দিন (যেমন: https://takadear.onrender.com)';
+    }
   }
   return null;
 }

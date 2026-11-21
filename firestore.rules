@@ -187,11 +187,12 @@ service cloud.firestore {
 
     function isValidReferralSettings(data) {
       return data.keys().hasAll(['referrerBonus', 'friendBonus', 'minTasks', 'updatedAt'])
-        && data.keys().hasOnly(['referrerBonus', 'friendBonus', 'minTasks', 'conditionNote', 'updatedAt'])
+        && data.keys().hasOnly(['referrerBonus', 'friendBonus', 'minTasks', 'conditionNote', 'referralDomain', 'updatedAt'])
         && data.referrerBonus is number && data.referrerBonus >= 0.5 && data.referrerBonus <= 100
         && data.friendBonus is number && data.friendBonus >= 0 && data.friendBonus <= 100
         && data.minTasks is int && data.minTasks >= 0 && data.minTasks <= 10
         && (!('conditionNote' in data) || data.conditionNote == null || (data.conditionNote is string && data.conditionNote.size() <= 300))
+        && (!('referralDomain' in data) || data.referralDomain == null || (data.referralDomain is string && data.referralDomain.size() <= 200))
         && data.updatedAt is timestamp;
     }
 
@@ -468,6 +469,18 @@ service cloud.firestore {
         ]);
     }
 
+    function isRefCodeUpgradeToTkdAction() {
+      return isNotSuspendedExisting()
+        && incoming().diff(existing()).affectedKeys().hasOnly(['refCode', 'updatedAt'])
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && !existing().refCode.matches('^TKD[0-9]{4}$')
+        && incoming().refCode.matches('^TKD[0-9]{4}$')
+        && existsAfter(/databases/$(database)/documents/referralCodes/$(incoming().refCode))
+        && getAfter(/databases/$(database)/documents/referralCodes/$(incoming().refCode)).data.ownerId == request.auth.uid;
+    }
+
     function isAdminUserAdjustmentAction() {
       return incoming().diff(existing()).affectedKeys().hasOnly([
           'balance', 'totalEarned', 'referrals', 'refEarned', 'dailyDate', 'dailyTodayEarn',
@@ -507,6 +520,7 @@ service cloud.firestore {
             || isReferralClaimAction()
             || isFriendReferralBonusAction()
             || isWithdrawalDeductionAction()
+            || isRefCodeUpgradeToTkdAction()
             || isLegacySchemaRepairAction()
           ))
         );

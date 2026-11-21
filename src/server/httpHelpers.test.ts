@@ -75,7 +75,11 @@ test('safeParseJsonResponse parses valid JSON and handles empty, HTML, and trunc
         makeMockFetchResponse({ ok: true, status: 200, body: '' }),
         'Fallback'
       ),
-    (err: Error) => err.message.includes('খালি উত্তর') && !err.message.includes('Unexpected end of JSON input')
+    (err: Error) =>
+      err.message.includes('খালি উত্তর') &&
+      err.message.includes('HTTP 200') &&
+      err.message.includes('Web Service') &&
+      !err.message.includes('Unexpected end of JSON input')
   );
 
   await assert.rejects(
